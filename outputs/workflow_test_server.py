@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT.parent / "work" / "test-workflow-data.json"
-TEST_PASSWORD = "StarrailTest2026!"
+TEST_PASSWORD = "123456"
 USERS = [
     {"username": "admin_xiangfeng", "name": "向峰", "role": "超级管理员 / 设计经理", "department": "管理端"},
     {"username": "requester_chen_guopeng", "name": "陈国朋", "role": "需求提交人", "department": "国内电商"},
