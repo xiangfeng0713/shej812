@@ -21,10 +21,10 @@ USERS = [
     {"username": "requester_chen_lingyu", "name": "陈凌宇", "role": "需求提交人", "department": "海外电商"},
     {"username": "requester_liu_qiqi", "name": "刘琦琪", "role": "需求提交人", "department": "产品市场"},
     {"username": "requester_peng_yanglu", "name": "彭阳陆", "role": "需求提交人", "department": "线下物料"},
-    {"username": "approver_wei_wendong", "name": "魏文东", "role": "部门负责人", "department": "国内电商"},
+    {"username": "reviewer_wei_wendong", "name": "魏文东", "role": "部门审核人", "department": "国内电商"},
     {"username": "designer_wu_suyin", "name": "吴素吟", "role": "设计师", "department": "设计部"},
     {"username": "designer_xu_dudu", "name": "徐都都", "role": "设计师", "department": "设计部"},
-    {"username": "reviewer_zhou_xuehua", "name": "周雪华", "role": "部门审核人", "department": "产品市场"},
+    {"username": "approver_zhou_xuehua", "name": "周雪华", "role": "部门负责人审批（唯一负责人）", "department": "管理端"},
 ]
 USER_MAP = {user["username"]: user for user in USERS}
 SESSIONS: dict[str, str] = {}
