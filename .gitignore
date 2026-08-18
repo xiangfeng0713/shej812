@@ -1,4 +1,3 @@
 work/
 *.tmp
 *.log
-outputs/__pycache__/
