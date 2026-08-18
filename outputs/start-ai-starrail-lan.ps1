@@ -16,4 +16,4 @@ try {
 }
 
 Set-Location $siteRoot
-python -m http.server $port --bind 0.0.0.0
+python workflow_test_server.py --port $port
