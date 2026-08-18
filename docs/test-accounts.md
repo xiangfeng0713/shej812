@@ -12,7 +12,7 @@
 | approver_wei_wendong | 魏文东 | 部门负责人 | 国内电商 |
 | designer_wu_suyin | 吴素吟 | 设计师 | 设计部 |
 | designer_xu_dudu | 徐都都 | 设计师 | 设计部 |
-| accepter_zhou_xuehua | 周雪华 | 需求验收人 | 产品市场 |
+| reviewer_zhou_xuehua | 周雪华 | 部门审核人 | 产品市场 |
 
 本阶段不需要手机号。该密码仅用于局域网内测，禁止作为正式上线密码。
 

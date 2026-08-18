@@ -24,7 +24,7 @@ USERS = [
     {"username": "approver_wei_wendong", "name": "魏文东", "role": "部门负责人", "department": "国内电商"},
     {"username": "designer_wu_suyin", "name": "吴素吟", "role": "设计师", "department": "设计部"},
     {"username": "designer_xu_dudu", "name": "徐都都", "role": "设计师", "department": "设计部"},
-    {"username": "accepter_zhou_xuehua", "name": "周雪华", "role": "需求验收人", "department": "产品市场"},
+    {"username": "reviewer_zhou_xuehua", "name": "周雪华", "role": "部门审核人", "department": "产品市场"},
 ]
 USER_MAP = {user["username"]: user for user in USERS}
 SESSIONS: dict[str, str] = {}
