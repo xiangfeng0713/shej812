@@ -184,7 +184,8 @@ class Handler(SimpleHTTPRequestHandler):
             user, data = self.require_user(data)
             if user:
                 my_tasks = [task for task in data["tasks"] if user["id"] in task.get("assignee_ids", [])]
-                self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks})
+                submitted_tasks = [task for task in data["tasks"] if task.get("submitter", {}).get("id") == user["id"]]
+                self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks})
             return
         super().do_GET()
 
