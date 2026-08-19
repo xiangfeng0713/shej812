@@ -280,6 +280,40 @@ class Handler(SimpleHTTPRequestHandler):
         write_data(data)
         self.send_json({"task": task})
 
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/api/users/"):
+            self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
+            return
+        admin, data = self.require_admin()
+        if not admin:
+            return
+        user_id = path.rsplit("/", 1)[-1]
+        user = next((item for item in data["users"] if item["id"] == user_id), None)
+        if not user:
+            self.send_json({"error": "未找到该人员。"}, HTTPStatus.NOT_FOUND)
+            return
+        payload = self.read_json()
+        username = str(payload.get("username", "")).strip()
+        name = str(payload.get("name", "")).strip()
+        password = str(payload.get("password", ""))
+        if not username or not name:
+            self.send_json({"error": "账号和姓名不能为空。"}, HTTPStatus.BAD_REQUEST)
+            return
+        if any(item["id"] != user_id and item["username"] == username for item in data["users"]):
+            self.send_json({"error": "该账号已存在。"}, HTTPStatus.CONFLICT)
+            return
+        if password and len(password) < 8:
+            self.send_json({"error": "新密码至少需要 8 位。"}, HTTPStatus.BAD_REQUEST)
+            return
+        user["username"] = username
+        user["name"] = name
+        user["tag"] = str(payload.get("tag", "")).strip()
+        if password:
+            user["password"] = password_hash(password)
+        write_data(data)
+        self.send_json({"user": public_user(user)})
+
     def do_DELETE(self):
         path = urlparse(self.path).path
         if not path.startswith("/api/users/"):
