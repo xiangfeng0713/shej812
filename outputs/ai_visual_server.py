@@ -69,14 +69,20 @@ def user_by_name(data: dict, name: str) -> dict | None:
     return next((user for user in active_users(data) if user["name"] == name), None)
 
 
+def user_by_id(data: dict, user_id: str) -> dict | None:
+    return next((user for user in active_users(data) if user["id"] == user_id), None)
+
+
 def admin_user(data: dict) -> dict | None:
     return next((user for user in active_users(data) if user.get("is_admin")), None)
 
 
 def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple[str, list[str]]:
     submitter_id = task["submitter"]["id"]
-    owner = user_by_name(data, str(payload.get("design_owner", task.get("design_owner", {}).get("name", ""))))
-    partner = user_by_name(data, str(payload.get("coop_designer", task.get("coop_designer", {}).get("name", ""))))
+    stored_owner = task.get("design_owner", {})
+    stored_partner = task.get("coop_designer", {}) or {}
+    owner = user_by_id(data, str(stored_owner.get("id", ""))) or user_by_name(data, str(payload.get("design_owner", stored_owner.get("name", ""))))
+    partner = user_by_id(data, str(stored_partner.get("id", ""))) or user_by_name(data, str(payload.get("coop_designer", stored_partner.get("name", ""))))
     admin = admin_user(data)
     if action == "approval_pass":
         return "设计需求分配", [admin["id"]] if admin else []
