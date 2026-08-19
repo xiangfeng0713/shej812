@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import secrets
+import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -17,11 +18,46 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT.parent / "work" / "ai-visual-shared-data.json"
-SESSIONS: dict[str, str] = {}
+SESSIONS: dict[str, tuple[str, float]] = {}
+SESSION_TTL_SECONDS = 8 * 60 * 60
+MAX_JSON_BYTES = 64 * 1024
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 10 * 60
+LOGIN_BLOCK_SECONDS = 15 * 60
+LOGIN_ATTEMPTS: dict[str, dict[str, float | int]] = {}
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def create_session(user_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    SESSIONS[token] = (user_id, time.time() + SESSION_TTL_SECONDS)
+    return token
+
+
+def login_is_allowed(client_ip: str) -> bool:
+    record = LOGIN_ATTEMPTS.get(client_ip)
+    if not record:
+        return True
+    current = time.time()
+    if current < record.get("blocked_until", 0):
+        return False
+    if current - record.get("first_at", current) > LOGIN_WINDOW_SECONDS:
+        LOGIN_ATTEMPTS.pop(client_ip, None)
+    return True
+
+
+def record_login_failure(client_ip: str) -> None:
+    current = time.time()
+    record = LOGIN_ATTEMPTS.get(client_ip, {"count": 0, "first_at": current, "blocked_until": 0})
+    if current - record["first_at"] > LOGIN_WINDOW_SECONDS:
+        record = {"count": 0, "first_at": current, "blocked_until": 0}
+    record["count"] += 1
+    if record["count"] >= LOGIN_MAX_ATTEMPTS:
+        record["blocked_until"] = current + LOGIN_BLOCK_SECONDS
+    LOGIN_ATTEMPTS[client_ip] = record
 
 
 def password_hash(password: str, salt: str | None = None) -> dict[str, str]:
@@ -132,6 +168,17 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"[{self.log_date_time_string()}] {fmt % args}")
 
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+        )
+        super().end_headers()
+
     def send_json(self, body: dict, status: HTTPStatus = HTTPStatus.OK, cookie: str | None = None):
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -143,18 +190,32 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def read_json(self) -> dict:
-        size = int(self.headers.get("Content-Length", "0"))
+    def read_json(self) -> dict | None:
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json({"error": "请求格式错误。"}, HTTPStatus.BAD_REQUEST)
+            return None
+        if size < 0 or size > MAX_JSON_BYTES:
+            self.send_json({"error": "请求数据过大。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return None
         try:
             return json.loads(self.rfile.read(size).decode("utf-8")) if size else {}
-        except json.JSONDecodeError:
-            return {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json({"error": "请求格式错误。"}, HTTPStatus.BAD_REQUEST)
+            return None
 
     def current_user(self, data: dict | None = None) -> dict | None:
         data = data or read_data()
         cookie = SimpleCookie(self.headers.get("Cookie"))
         token = cookie.get("ai_visual_session")
-        user_id = SESSIONS.get(token.value) if token else None
+        session = SESSIONS.get(token.value) if token else None
+        if not session:
+            return None
+        user_id, expires_at = session
+        if time.time() >= expires_at:
+            SESSIONS.pop(token.value, None)
+            return None
         return next((user for user in data["users"] if user["id"] == user_id and user.get("active", True)), None)
 
     def require_user(self, data: dict | None = None) -> tuple[dict | None, dict]:
@@ -197,11 +258,16 @@ class Handler(SimpleHTTPRequestHandler):
                 ]
                 self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks, "processed_tasks": processed_tasks})
             return
+        if path not in {"/", "/ai-starrail-design-console.html"} and not path.startswith("/inspiration-assets/"):
+            self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
+            return
         super().do_GET()
 
     def do_POST(self):
         path = urlparse(self.path).path
         payload = self.read_json()
+        if payload is None:
+            return
         data = read_data()
         if path == "/api/bootstrap":
             if data["users"]:
@@ -214,18 +280,22 @@ class Handler(SimpleHTTPRequestHandler):
             user = {"id": secrets.token_hex(12), "username": "xiangfeng", "name": "向峰", "tag": "管理", "is_admin": True, "active": True, "password": password_hash(password), "created_at": now()}
             data["users"].append(user)
             write_data(data)
-            token = secrets.token_urlsafe(32)
-            SESSIONS[token] = user["id"]
+            token = create_session(user["id"])
             self.send_json({"user": public_user(user)}, HTTPStatus.CREATED, f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/")
             return
         if path == "/api/login":
             username = str(payload.get("username", "")).strip()
+            client_ip = self.client_address[0]
+            if not login_is_allowed(client_ip):
+                self.send_json({"error": "登录失败次数过多，请 15 分钟后再试。"}, HTTPStatus.TOO_MANY_REQUESTS)
+                return
             user = next((item for item in data["users"] if item.get("username") == username and item.get("active", True)), None)
             if not user or not password_valid(str(payload.get("password", "")), user):
+                record_login_failure(client_ip)
                 self.send_json({"error": "账号或密码错误。"}, HTTPStatus.UNAUTHORIZED)
                 return
-            token = secrets.token_urlsafe(32)
-            SESSIONS[token] = user["id"]
+            LOGIN_ATTEMPTS.pop(client_ip, None)
+            token = create_session(user["id"])
             self.send_json({"user": public_user(user)}, cookie=f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/")
             return
         if path == "/api/logout":
@@ -302,6 +372,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
             return
         payload = self.read_json()
+        if payload is None:
+            return
         previous_stage = task["stage"]
         try:
             task["stage"], task["assignee_ids"] = stage_assignees(data, task, str(payload.get("action", "")), payload)
