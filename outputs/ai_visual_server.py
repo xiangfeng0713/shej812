@@ -65,6 +65,52 @@ def active_users(data: dict) -> list[dict]:
     return [user for user in data["users"] if user.get("active", True)]
 
 
+def user_by_name(data: dict, name: str) -> dict | None:
+    return next((user for user in active_users(data) if user["name"] == name), None)
+
+
+def admin_user(data: dict) -> dict | None:
+    return next((user for user in active_users(data) if user.get("is_admin")), None)
+
+
+def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple[str, list[str]]:
+    submitter_id = task["submitter"]["id"]
+    owner = user_by_name(data, str(payload.get("design_owner", task.get("design_owner", {}).get("name", ""))))
+    partner = user_by_name(data, str(payload.get("coop_designer", task.get("coop_designer", {}).get("name", ""))))
+    admin = admin_user(data)
+    if action == "approval_pass":
+        return "设计需求分配", [admin["id"]] if admin else []
+    if action == "approval_return":
+        return "填写需求", [submitter_id]
+    if action == "allocation_confirm":
+        if not owner:
+            raise ValueError("请选择设计负责人。")
+        task["design_owner"] = public_user(owner)
+        task["coop_designer"] = public_user(partner) if partner else None
+        return "需求校对", [user["id"] for user in (owner, partner) if user]
+    if action == "proof_pass":
+        if not owner:
+            raise ValueError("请先完成设计负责人分配。")
+        return "需求交付", [owner["id"]]
+    if action == "proof_return":
+        return "填写需求", [submitter_id]
+    if action == "delivery_confirm":
+        return "初稿审核", [admin["id"]] if admin else []
+    if action == "review_pass":
+        return "需求方验收 / 评分", [submitter_id]
+    if action == "review_return":
+        if not owner:
+            raise ValueError("请先完成设计负责人分配。")
+        return "需求交付", [owner["id"]]
+    if action == "acceptance_pass":
+        return "验收完结", []
+    if action == "acceptance_return":
+        if not owner:
+            raise ValueError("请先完成设计负责人分配。")
+        return "需求交付", [owner["id"]]
+    raise ValueError("不支持的流程操作。")
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -129,7 +175,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/tasks":
             user, data = self.require_user(data)
             if user:
-                self.send_json({"tasks": data["tasks"]})
+                my_tasks = [task for task in data["tasks"] if user["id"] in task.get("assignee_ids", [])]
+                self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks})
             return
         super().do_GET()
 
@@ -196,12 +243,42 @@ class Handler(SimpleHTTPRequestHandler):
             if not str(task.get("name", "")).strip():
                 self.send_json({"error": "任务名称不能为空。"}, HTTPStatus.BAD_REQUEST)
                 return
-            record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(user), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "created_at": now()}
+            approver = user_by_name(data, str(task.get("approver", "")))
+            if not approver:
+                self.send_json({"error": "请选择需求内部审批人。"}, HTTPStatus.BAD_REQUEST)
+                return
+            record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "created_at": now(), "updated_at": now()}
             data["tasks"].append(record)
             write_data(data)
             self.send_json({"task": record}, HTTPStatus.CREATED)
             return
         self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
+
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/api/tasks/"):
+            self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
+            return
+        user, data = self.require_user()
+        if not user:
+            return
+        task_id = path.rsplit("/", 1)[-1]
+        task = next((item for item in data["tasks"] if item["id"] == task_id), None)
+        if not task:
+            self.send_json({"error": "未找到该任务。"}, HTTPStatus.NOT_FOUND)
+            return
+        if not user.get("is_admin") and user["id"] not in task.get("assignee_ids", []):
+            self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
+            return
+        payload = self.read_json()
+        try:
+            task["stage"], task["assignee_ids"] = stage_assignees(data, task, str(payload.get("action", "")), payload)
+        except ValueError as error:
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            return
+        task["updated_at"] = now()
+        write_data(data)
+        self.send_json({"task": task})
 
     def do_DELETE(self):
         path = urlparse(self.path).path
