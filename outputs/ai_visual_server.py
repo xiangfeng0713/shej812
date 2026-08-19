@@ -185,7 +185,11 @@ class Handler(SimpleHTTPRequestHandler):
             if user:
                 my_tasks = [task for task in data["tasks"] if user["id"] in task.get("assignee_ids", [])]
                 submitted_tasks = [task for task in data["tasks"] if task.get("submitter", {}).get("id") == user["id"]]
-                self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks})
+                processed_tasks = [
+                    task for task in data["tasks"]
+                    if any(entry.get("by", {}).get("id") == user["id"] and entry.get("action") != "submitted" for entry in task.get("history", []))
+                ]
+                self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks, "processed_tasks": processed_tasks})
             return
         super().do_GET()
 
@@ -260,7 +264,8 @@ class Handler(SimpleHTTPRequestHandler):
             if not approver:
                 self.send_json({"error": "请选择需求内部审批人。"}, HTTPStatus.BAD_REQUEST)
                 return
-            record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(submitter), "created_by": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "created_at": now(), "updated_at": now()}
+            created_at = now()
+            record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(submitter), "created_by": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "history": [{"action": "submitted", "by": public_user(user), "at": created_at}], "created_at": created_at, "updated_at": created_at}
             data["tasks"].append(record)
             write_data(data)
             self.send_json({"task": record}, HTTPStatus.CREATED)
@@ -284,6 +289,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
             return
         payload = self.read_json()
+        previous_stage = task["stage"]
         try:
             task["stage"], task["assignee_ids"] = stage_assignees(data, task, str(payload.get("action", "")), payload)
         except ValueError as error:
@@ -292,6 +298,7 @@ class Handler(SimpleHTTPRequestHandler):
         comment = str(payload.get("comment", "")).strip()
         if comment:
             task["last_return"] = {"comment": comment, "by": public_user(user), "at": now()}
+        task.setdefault("history", []).append({"action": str(payload.get("action", "")), "from_stage": previous_stage, "to_stage": task["stage"], "by": public_user(user), "comment": comment, "at": now()})
         task["updated_at"] = now()
         write_data(data)
         self.send_json({"task": task})
