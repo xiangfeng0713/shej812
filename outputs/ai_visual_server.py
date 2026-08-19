@@ -81,6 +81,8 @@ def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple
     if action == "approval_pass":
         return "设计需求分配", [admin["id"]] if admin else []
     if action == "approval_return":
+        task["resubmit_stage"] = "部门负责人审批"
+        task["resubmit_assignee_ids"] = [task["approver"]["id"]]
         return "填写需求", [submitter_id]
     if action == "allocation_confirm":
         if not owner:
@@ -93,7 +95,13 @@ def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple
             raise ValueError("请先完成设计负责人分配。")
         return "需求交付", [owner["id"]]
     if action == "proof_return":
+        if not owner:
+            raise ValueError("请先完成设计负责人分配。")
+        task["resubmit_stage"] = "需求校对"
+        task["resubmit_assignee_ids"] = [user["id"] for user in (owner, partner) if user]
         return "填写需求", [submitter_id]
+    if action == "resubmit":
+        return task.pop("resubmit_stage", "部门负责人审批"), task.pop("resubmit_assignee_ids", [task["approver"]["id"]])
     if action == "delivery_confirm":
         return "初稿审核", [admin["id"]] if admin else []
     if action == "review_pass":
@@ -280,6 +288,9 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError as error:
             self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
+        comment = str(payload.get("comment", "")).strip()
+        if comment:
+            task["last_return"] = {"comment": comment, "by": public_user(user), "at": now()}
         task["updated_at"] = now()
         write_data(data)
         self.send_json({"task": task})
