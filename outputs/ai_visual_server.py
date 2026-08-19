@@ -309,6 +309,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
         comment = str(payload.get("comment", "")).strip()
+        if str(payload.get("action", "")) == "delivery_confirm":
+            task.update({
+                "shared_path": str(payload.get("shared_path", "")).strip(),
+                "final_delivery_date": str(payload.get("final_delivery_date", "")).strip(),
+                "final_delivery_time": str(payload.get("final_delivery_time", "")).strip(),
+            })
         if comment:
             task["last_return"] = {"comment": comment, "by": public_user(user), "at": now()}
         task.setdefault("history", []).append({"action": str(payload.get("action", "")), "from_stage": previous_stage, "to_stage": task["stage"], "by": public_user(user), "comment": comment, "at": now()})
