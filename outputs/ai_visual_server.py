@@ -79,7 +79,7 @@ def admin_user(data: dict) -> dict | None:
 
 def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple[str, list[str]]:
     submitter_id = task["submitter"]["id"]
-    stored_owner = task.get("design_owner", {})
+    stored_owner = task.get("design_owner", {}) or {}
     stored_partner = task.get("coop_designer", {}) or {}
     owner = user_by_id(data, str(stored_owner.get("id", ""))) or user_by_name(data, str(payload.get("design_owner", stored_owner.get("name", ""))))
     partner = user_by_id(data, str(stored_partner.get("id", ""))) or user_by_name(data, str(payload.get("coop_designer", stored_partner.get("name", ""))))
