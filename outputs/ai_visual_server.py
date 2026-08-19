@@ -266,6 +266,13 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             created_at = now()
             record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(submitter), "created_by": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "history": [{"action": "submitted", "by": public_user(user), "at": created_at}], "created_at": created_at, "updated_at": created_at}
+            record.update({
+                "submit_date": str(task.get("submit_date", "")),
+                "submit_time": str(task.get("submit_time", "")),
+                "delivery_date": str(task.get("delivery_date", "")),
+                "delivery_time": str(task.get("delivery_time", "")),
+                "image_spec": str(task.get("image_spec", "")),
+            })
             data["tasks"].append(record)
             write_data(data)
             self.send_json({"task": record}, HTTPStatus.CREATED)
