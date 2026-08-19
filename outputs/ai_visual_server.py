@@ -243,11 +243,15 @@ class Handler(SimpleHTTPRequestHandler):
             if not str(task.get("name", "")).strip():
                 self.send_json({"error": "任务名称不能为空。"}, HTTPStatus.BAD_REQUEST)
                 return
+            submitter = user_by_name(data, str(task.get("submitter", "")))
             approver = user_by_name(data, str(task.get("approver", "")))
+            if not submitter:
+                self.send_json({"error": "请选择提交人姓名。"}, HTTPStatus.BAD_REQUEST)
+                return
             if not approver:
                 self.send_json({"error": "请选择需求内部审批人。"}, HTTPStatus.BAD_REQUEST)
                 return
-            record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "created_at": now(), "updated_at": now()}
+            record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(submitter), "created_by": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "created_at": now(), "updated_at": now()}
             data["tasks"].append(record)
             write_data(data)
             self.send_json({"task": record}, HTTPStatus.CREATED)
