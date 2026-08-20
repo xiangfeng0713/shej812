@@ -353,6 +353,38 @@ class Handler(SimpleHTTPRequestHandler):
             write_data(data)
             self.send_json({"task": record}, HTTPStatus.CREATED)
             return
+        if path.startswith("/api/tasks/") and path.endswith("/priority"):
+            user, data = self.require_user(data)
+            if not user:
+                return
+            task_id = path.removeprefix("/api/tasks/").removesuffix("/priority").strip("/")
+            task = next((item for item in data["tasks"] if item["id"] == task_id), None)
+            if not task:
+                self.send_json({"error": "未找到该任务。"}, HTTPStatus.NOT_FOUND)
+                return
+            is_submitter = user["id"] in {
+                task.get("submitter", {}).get("id"),
+                task.get("created_by", {}).get("id"),
+            }
+            if not user.get("is_admin") and not is_submitter:
+                self.send_json({"error": "仅任务提交人或超级管理员可以调整优先级。"}, HTTPStatus.FORBIDDEN)
+                return
+            priority = str(payload.get("priority", "")).strip()
+            if priority not in {"常规", "中等", "加急"}:
+                self.send_json({"error": "请选择常规、中等或加急。"}, HTTPStatus.BAD_REQUEST)
+                return
+            task["priority"] = priority
+            task["pinned"] = True
+            task["updated_at"] = now()
+            task.setdefault("history", []).append({
+                "action": "priority_adjusted",
+                "by": public_user(user),
+                "comment": priority,
+                "at": task["updated_at"],
+            })
+            write_data(data)
+            self.send_json({"task": task})
+            return
         self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
 
     def do_PUT(self):
