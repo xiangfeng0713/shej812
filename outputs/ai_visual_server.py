@@ -465,17 +465,22 @@ class Handler(SimpleHTTPRequestHandler):
         if not path.startswith("/api/users/"):
             self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
             return
-        admin, data = self.require_admin()
-        if not admin:
+        actor, data = self.require_user()
+        if not actor:
             return
         user_id = path.rsplit("/", 1)[-1]
         user = next((item for item in data["users"] if item["id"] == user_id), None)
         if not user:
             self.send_json({"error": "未找到该人员。"}, HTTPStatus.NOT_FOUND)
             return
+        if not actor.get("is_admin") and actor["id"] != user_id:
+            self.send_json({"error": "只能修改自己的账号资料。"}, HTTPStatus.FORBIDDEN)
+            return
         payload = self.read_json()
-        username = str(payload.get("username", "")).strip()
-        name = str(payload.get("name", "")).strip()
+        # Ordinary users can only rotate their own password. Account identity and
+        # job information remain managed by the administrator.
+        username = user["username"] if not actor.get("is_admin") else str(payload.get("username", "")).strip()
+        name = user["name"] if not actor.get("is_admin") else str(payload.get("name", "")).strip()
         password = str(payload.get("password", ""))
         if not username or not name:
             self.send_json({"error": "账号和姓名不能为空。"}, HTTPStatus.BAD_REQUEST)
@@ -488,7 +493,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         user["username"] = username
         user["name"] = name
-        user["tag"] = str(payload.get("tag", "")).strip()
+        if actor.get("is_admin"):
+            user["tag"] = str(payload.get("tag", "")).strip()
         if password:
             user["password"] = password_hash(password)
         write_data(data)
