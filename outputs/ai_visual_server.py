@@ -373,9 +373,20 @@ class Handler(SimpleHTTPRequestHandler):
             if priority not in {"常规", "中等", "加急"}:
                 self.send_json({"error": "请选择常规、中等或加急。"}, HTTPStatus.BAD_REQUEST)
                 return
+            if task.get("stage") == "验收完结" or not task.get("assignee_ids"):
+                self.send_json({"error": "该任务已完结，当前没有负责人可通知。"}, HTTPStatus.BAD_REQUEST)
+                return
+            recipients = [user_by_id(data, user_id) for user_id in task.get("assignee_ids", [])]
+            recipients = [person for person in recipients if person]
             task["priority"] = priority
             task["pinned"] = True
             task["updated_at"] = now()
+            task["priority_notification"] = {
+                "priority": priority,
+                "by": public_user(user),
+                "recipient_ids": [person["id"] for person in recipients],
+                "at": task["updated_at"],
+            }
             task.setdefault("history", []).append({
                 "action": "priority_adjusted",
                 "by": public_user(user),
@@ -383,7 +394,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "at": task["updated_at"],
             })
             write_data(data)
-            self.send_json({"task": task})
+            self.send_json({"task": task, "notified_users": [public_user(person) for person in recipients]})
             return
         self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
 
