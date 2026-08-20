@@ -373,6 +373,10 @@ class Handler(SimpleHTTPRequestHandler):
             if priority not in {"常规", "中等", "加急"}:
                 self.send_json({"error": "请选择常规、中等或加急。"}, HTTPStatus.BAD_REQUEST)
                 return
+            reason = str(payload.get("reason", "")).strip()
+            if not reason:
+                self.send_json({"error": "请填写临时优先处理原因。"}, HTTPStatus.BAD_REQUEST)
+                return
             if task.get("stage") == "验收完结" or not task.get("assignee_ids"):
                 self.send_json({"error": "该任务已完结，当前没有负责人可通知。"}, HTTPStatus.BAD_REQUEST)
                 return
@@ -385,12 +389,13 @@ class Handler(SimpleHTTPRequestHandler):
                 "priority": priority,
                 "by": public_user(user),
                 "recipient_ids": [person["id"] for person in recipients],
+                "reason": reason,
                 "at": task["updated_at"],
             }
             task.setdefault("history", []).append({
                 "action": "priority_adjusted",
                 "by": public_user(user),
-                "comment": priority,
+                "comment": reason,
                 "at": task["updated_at"],
             })
             write_data(data)
