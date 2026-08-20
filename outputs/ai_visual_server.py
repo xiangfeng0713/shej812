@@ -368,7 +368,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not task:
             self.send_json({"error": "未找到该任务。"}, HTTPStatus.NOT_FOUND)
             return
-        if not user.get("is_admin") and user["id"] not in task.get("assignee_ids", []):
+        if user["id"] not in task.get("assignee_ids", []):
             self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
             return
         payload = self.read_json()
