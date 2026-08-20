@@ -368,7 +368,8 @@ class Handler(SimpleHTTPRequestHandler):
         if not task:
             self.send_json({"error": "未找到该任务。"}, HTTPStatus.NOT_FOUND)
             return
-        if user["id"] not in task.get("assignee_ids", []):
+        is_admin_override = user.get("is_admin") and user["id"] not in task.get("assignee_ids", [])
+        if not is_admin_override and user["id"] not in task.get("assignee_ids", []):
             self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
             return
         payload = self.read_json()
@@ -389,7 +390,7 @@ class Handler(SimpleHTTPRequestHandler):
             })
         if comment:
             task["last_return"] = {"comment": comment, "by": public_user(user), "at": now()}
-        task.setdefault("history", []).append({"action": str(payload.get("action", "")), "from_stage": previous_stage, "to_stage": task["stage"], "by": public_user(user), "comment": comment, "at": now()})
+        task.setdefault("history", []).append({"action": str(payload.get("action", "")), "from_stage": previous_stage, "to_stage": task["stage"], "by": public_user(user), "comment": comment, "admin_override": bool(is_admin_override), "at": now()})
         task["updated_at"] = now()
         write_data(data)
         self.send_json({"task": task})
