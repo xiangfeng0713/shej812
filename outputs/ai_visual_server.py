@@ -286,15 +286,20 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/login":
             username = str(payload.get("username", "")).strip()
             client_ip = self.client_address[0]
-            if not login_is_allowed(client_ip):
+            # Keep lockouts scoped to the attempted account.  On a LAN several
+            # colleagues can share one outward-facing IP; an IP-only counter
+            # would otherwise block a correct login after somebody else mistypes
+            # a different account.
+            login_key = f"{client_ip}:{username.casefold()}"
+            if not login_is_allowed(login_key):
                 self.send_json({"error": "登录失败次数过多，请 15 分钟后再试。"}, HTTPStatus.TOO_MANY_REQUESTS)
                 return
             user = next((item for item in data["users"] if item.get("username") == username and item.get("active", True)), None)
             if not user or not password_valid(str(payload.get("password", "")), user):
-                record_login_failure(client_ip)
+                record_login_failure(login_key)
                 self.send_json({"error": "账号或密码错误。"}, HTTPStatus.UNAUTHORIZED)
                 return
-            LOGIN_ATTEMPTS.pop(client_ip, None)
+            LOGIN_ATTEMPTS.pop(login_key, None)
             token = create_session(user["id"])
             self.send_json({"user": public_user(user)}, cookie=f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/")
             return
