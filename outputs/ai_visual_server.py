@@ -116,9 +116,19 @@ def admin_user(data: dict) -> dict | None:
 def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple[str, list[str]]:
     submitter_id = task["submitter"]["id"]
     stored_owner = task.get("design_owner", {}) or {}
-    stored_partner = task.get("coop_designer", {}) or {}
     owner = user_by_id(data, str(stored_owner.get("id", ""))) or user_by_name(data, str(payload.get("design_owner", stored_owner.get("name", ""))))
-    partner = user_by_id(data, str(stored_partner.get("id", ""))) or user_by_name(data, str(payload.get("coop_designer", stored_partner.get("name", ""))))
+    stored_partners = task.get("coop_designers") or ([] if not task.get("coop_designer") else [task["coop_designer"]])
+    requested_partners = payload.get("coop_designers", stored_partners)
+    if not isinstance(requested_partners, list):
+        requested_partners = [requested_partners]
+    partners = []
+    for partner_value in requested_partners:
+        if isinstance(partner_value, dict):
+            partner = user_by_id(data, str(partner_value.get("id", ""))) or user_by_name(data, str(partner_value.get("name", "")))
+        else:
+            partner = user_by_name(data, str(partner_value))
+        if partner and partner["id"] != (owner or {}).get("id") and all(existing["id"] != partner["id"] for existing in partners):
+            partners.append(partner)
     admin = admin_user(data)
     if action == "approval_pass":
         return "设计需求分配", [admin["id"]] if admin else []
@@ -130,8 +140,10 @@ def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple
         if not owner:
             raise ValueError("请选择设计负责人。")
         task["design_owner"] = public_user(owner)
-        task["coop_designer"] = public_user(partner) if partner else None
-        return "需求校对", [user["id"] for user in (owner, partner) if user]
+        task["coop_designers"] = [public_user(partner) for partner in partners]
+        # Retain the legacy field so existing task records and old views stay compatible.
+        task["coop_designer"] = task["coop_designers"][0] if task["coop_designers"] else None
+        return "需求校对", [owner["id"], *[partner["id"] for partner in partners]]
     if action == "proof_pass":
         if not owner:
             raise ValueError("请先完成设计负责人分配。")
@@ -140,7 +152,7 @@ def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple
         if not owner:
             raise ValueError("请先完成设计负责人分配。")
         task["resubmit_stage"] = "需求校对"
-        task["resubmit_assignee_ids"] = [user["id"] for user in (owner, partner) if user]
+        task["resubmit_assignee_ids"] = [owner["id"], *[partner["id"] for partner in partners]]
         return "填写需求", [submitter_id]
     if action == "resubmit":
         return task.pop("resubmit_stage", "部门负责人审批"), task.pop("resubmit_assignee_ids", [task["approver"]["id"]])
