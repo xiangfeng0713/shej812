@@ -27,22 +27,24 @@ SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
 REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
-DEFAULT_IMAGE_REVIEW_TARGETS = {
-    "domestic_stay": "18",
-    "domestic_roi": "4",
-    "domestic_conversion": "4.5",
-    "overseas_221b_click": "0.8",
-    "overseas_221b_conversion": "5.20",
-    "overseas_221d_click": "0.8",
-    "overseas_221d_conversion": "5.20",
-}
-DEFAULT_VIDEO_REVIEW_TARGETS = {
-    "domestic_completion": "18",
-    "domestic_stay": "20",
-    "domestic_ctr": "7",
-    "overseas_tk_views": "10000",
-    "overseas_gmv": "xxxx",
-}
+DEFAULT_IMAGE_REVIEW_METRICS = (
+    {"id": "domestic_stay", "group": "国内渠道", "label": "平均停留时长", "unit": "秒", "compare": "gte", "target": "18"},
+    {"id": "domestic_roi", "group": "国内渠道", "label": "店铺综合推广 ROI", "unit": "", "compare": "gte", "target": "4"},
+    {"id": "domestic_conversion", "group": "国内渠道", "label": "付费点击转化率", "unit": "%", "compare": "gte", "target": "4.5"},
+    {"id": "overseas_221b_click", "group": "海外渠道", "label": "亚马逊 221B 点击率", "unit": "%", "compare": "gte", "target": "0.8"},
+    {"id": "overseas_221b_conversion", "group": "海外渠道", "label": "亚马逊 221B 转化率", "unit": "%", "compare": "gte", "target": "5.20"},
+    {"id": "overseas_221d_click", "group": "海外渠道", "label": "亚马逊 221D 点击率", "unit": "%", "compare": "gte", "target": "0.8"},
+    {"id": "overseas_221d_conversion", "group": "海外渠道", "label": "亚马逊 221D 转化率", "unit": "%", "compare": "gte", "target": "5.20"},
+)
+DEFAULT_VIDEO_REVIEW_METRICS = (
+    {"id": "domestic_completion", "group": "国内渠道", "label": "完播率", "unit": "%", "compare": "gt", "target": "18"},
+    {"id": "domestic_stay", "group": "国内渠道", "label": "视频人均停留时长", "unit": "s", "compare": "gt", "target": "20"},
+    {"id": "domestic_ctr", "group": "国内渠道", "label": "曝光点击率", "unit": "%", "compare": "gt", "target": "7"},
+    {"id": "overseas_tk_views", "group": "海外渠道", "label": "TK 播放量", "unit": "", "compare": "gte", "target": "10000"},
+    {"id": "overseas_gmv", "group": "海外渠道", "label": "GMV", "unit": "", "compare": "gte", "target": "xxxx"},
+)
+REVIEW_METRIC_GROUPS = {"国内渠道", "海外渠道"}
+MAX_REVIEW_METRICS = 30
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_BLOCK_SECONDS = 15 * 60
@@ -360,27 +362,40 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "复盘月份格式不正确。"}, HTTPStatus.BAD_REQUEST)
                     return
                 settings = data.get("review_settings", {})
-                saved = settings.get("image_targets", {})
-                # Preserve the three domestic values created by the previous
-                # version while migrating to the complete seven-metric model.
-                legacy = {"stay": "domestic_stay", "roi": "domestic_roi", "conversion": "domestic_conversion"}
-                saved = {legacy.get(key, key): value for key, value in saved.items()}
-                targets = {
-                    key: str(saved.get(key, value)).replace("秒", "").replace("%", "").strip()
-                    for key, value in DEFAULT_IMAGE_REVIEW_TARGETS.items()
-                }
-                actuals = settings.get("image_actuals", {}).get(month, {})
-                actuals = {key: str(actuals.get(key, "")) for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-                video_saved = settings.get("video_targets", {})
-                video_targets = {key: str(video_saved.get(key, value)).strip() for key, value in DEFAULT_VIDEO_REVIEW_TARGETS.items()}
+                image_metrics = settings.get("image_metrics")
+                if not isinstance(image_metrics, list):
+                    saved = settings.get("image_targets", {})
+                    legacy = {"stay": "domestic_stay", "roi": "domestic_roi", "conversion": "domestic_conversion"}
+                    saved = {legacy.get(key, key): value for key, value in saved.items()}
+                    image_metrics = [dict(metric) for metric in DEFAULT_IMAGE_REVIEW_METRICS]
+                    for metric in image_metrics:
+                        if metric["id"] in saved:
+                            metric["target"] = str(saved[metric["id"]]).replace("秒", "").replace("%", "").strip()
+                else:
+                    image_metrics = [dict(metric) for metric in image_metrics]
+                video_metrics = settings.get("video_metrics")
+                if not isinstance(video_metrics, list):
+                    saved = settings.get("video_targets", {})
+                    video_metrics = [dict(metric) for metric in DEFAULT_VIDEO_REVIEW_METRICS]
+                    for metric in video_metrics:
+                        if metric["id"] in saved:
+                            metric["target"] = str(saved[metric["id"]]).strip()
+                else:
+                    video_metrics = [dict(metric) for metric in video_metrics]
+                image_actuals = settings.get("image_actuals", {}).get(month, {})
+                image_actuals = {metric["id"]: str(image_actuals.get(metric["id"], "")) for metric in image_metrics}
                 video_actuals = settings.get("video_actuals", {}).get(month, {})
-                video_actuals = {key: str(video_actuals.get(key, "")) for key in DEFAULT_VIDEO_REVIEW_TARGETS}
+                video_actuals = {metric["id"]: str(video_actuals.get(metric["id"], "")) for metric in video_metrics}
+                image_notes = settings.get("image_notes", {}).get(month, {})
+                video_notes = settings.get("video_notes", {}).get(month, {})
                 self.send_json({
                     "month": month,
-                    "image_targets": targets,
-                    "image_actuals": actuals,
-                    "video_targets": video_targets,
+                    "image_metrics": image_metrics,
+                    "image_actuals": image_actuals,
+                    "image_notes": {"anomaly": str(image_notes.get("anomaly", "")), "improvement": str(image_notes.get("improvement", ""))},
+                    "video_metrics": video_metrics,
                     "video_actuals": video_actuals,
+                    "video_notes": {"anomaly": str(video_notes.get("anomaly", "")), "improvement": str(video_notes.get("improvement", ""))},
                 })
             return
         if path.startswith("/inspiration-assets/"):
@@ -453,48 +468,65 @@ class Handler(SimpleHTTPRequestHandler):
             if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
                 self.send_json({"error": "请选择正确的复盘月份。"}, HTTPStatus.BAD_REQUEST)
                 return
-            settings = data.setdefault("review_settings", {})
-            if section == "image":
-                incoming = payload.get("image_targets")
-                actual_incoming = payload.get("image_actuals")
-                if not isinstance(incoming, dict) or not isinstance(actual_incoming, dict):
-                    self.send_json({"error": "请填写图片复盘目标值和当月实际值。"}, HTTPStatus.BAD_REQUEST)
-                    return
-                targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-                actuals = {key: str(actual_incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-                if any(not metric_pattern.fullmatch(value) for value in targets.values()):
-                    self.send_json({"error": "七项目标值均须填写有效数字。"}, HTTPStatus.BAD_REQUEST)
-                    return
-                if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
-                    self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
-                    return
-                settings["image_targets"] = targets
-                settings.setdefault("image_actuals", {})[month] = actuals
-                response = {"month": month, "image_targets": targets, "image_actuals": actuals}
-            elif section == "video":
-                incoming = payload.get("video_targets")
-                actual_incoming = payload.get("video_actuals")
-                if not isinstance(incoming, dict) or not isinstance(actual_incoming, dict):
-                    self.send_json({"error": "请填写视频复盘目标值和当月实际值。"}, HTTPStatus.BAD_REQUEST)
-                    return
-                targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_VIDEO_REVIEW_TARGETS}
-                actuals = {key: str(actual_incoming.get(key, "")).strip() for key in DEFAULT_VIDEO_REVIEW_TARGETS}
-                if any(
-                    not metric_pattern.fullmatch(value)
-                    for key, value in targets.items()
-                    if not (key == "overseas_gmv" and value.casefold() == "xxxx")
-                ):
-                    self.send_json({"error": "视频目标值须填写有效数字；GMV 暂未确定时可填写 xxxx。"}, HTTPStatus.BAD_REQUEST)
-                    return
-                if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
-                    self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
-                    return
-                settings["video_targets"] = targets
-                settings.setdefault("video_actuals", {})[month] = actuals
-                response = {"month": month, "video_targets": targets, "video_actuals": actuals}
-            else:
+            if section not in {"image", "video"}:
                 self.send_json({"error": "复盘数据类型不正确。"}, HTTPStatus.BAD_REQUEST)
                 return
+            metrics_incoming = payload.get(f"{section}_metrics")
+            actual_incoming = payload.get(f"{section}_actuals")
+            notes_incoming = payload.get(f"{section}_notes")
+            if not isinstance(metrics_incoming, list) or not isinstance(actual_incoming, dict) or not isinstance(notes_incoming, dict):
+                self.send_json({"error": "请填写指标、当月实际值和改善说明。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not metrics_incoming or len(metrics_incoming) > MAX_REVIEW_METRICS:
+                self.send_json({"error": f"每个板块须保留 1 至 {MAX_REVIEW_METRICS} 个指标。"}, HTTPStatus.BAD_REQUEST)
+                return
+            metrics = []
+            ids = set()
+            for item in metrics_incoming:
+                if not isinstance(item, dict):
+                    self.send_json({"error": "指标数据格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                metric_id = str(item.get("id", "")).strip()
+                group = str(item.get("group", "")).strip()
+                label = str(item.get("label", "")).strip()
+                unit = str(item.get("unit", "")).strip()
+                compare = str(item.get("compare", "gte")).strip()
+                target = str(item.get("target", "")).strip()
+                if (
+                    not re.fullmatch(r"[a-z0-9_]{3,40}", metric_id)
+                    or metric_id in ids
+                    or group not in REVIEW_METRIC_GROUPS
+                    or not label
+                    or len(label) > 40
+                    or len(unit) > 10
+                    or compare not in {"gt", "gte"}
+                    or (not metric_pattern.fullmatch(target) and target.casefold() != "xxxx")
+                ):
+                    self.send_json({"error": "指标名称、渠道、目标值或单位不正确。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                ids.add(metric_id)
+                metrics.append({"id": metric_id, "group": group, "label": label, "unit": unit, "compare": compare, "target": target})
+            actuals = {metric["id"]: str(actual_incoming.get(metric["id"], "")).strip() for metric in metrics}
+            if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
+                self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
+                return
+            notes = {
+                "anomaly": str(notes_incoming.get("anomaly", "")).strip(),
+                "improvement": str(notes_incoming.get("improvement", "")).strip(),
+            }
+            if any(len(value) > 2000 for value in notes.values()):
+                self.send_json({"error": "异常说明和改善方向每项不超过 2000 个字符。"}, HTTPStatus.BAD_REQUEST)
+                return
+            settings = data.setdefault("review_settings", {})
+            settings[f"{section}_metrics"] = metrics
+            settings.setdefault(f"{section}_actuals", {})[month] = actuals
+            settings.setdefault(f"{section}_notes", {})[month] = notes
+            response = {
+                "month": month,
+                f"{section}_metrics": metrics,
+                f"{section}_actuals": actuals,
+                f"{section}_notes": notes,
+            }
             settings["updated_by"] = public_user(admin)
             settings["updated_at"] = now()
             write_data(data)
