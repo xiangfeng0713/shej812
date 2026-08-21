@@ -347,7 +347,9 @@ def normalize_review_case(payload: dict) -> dict:
             raise ValueError("点击率作品仅支持对应卡位的图片上传。")
     elif (media_type == "image" and slot not in range(1, 6)) or (media_type == "video" and slot != 6):
         raise ValueError("案例卡位不正确。")
-    if not re.fullmatch(r"[0-9a-f]{20}", task_id):
+    if task_id and not re.fullmatch(r"[0-9a-f]{20}", task_id):
+        raise ValueError("关联任务不正确。")
+    if category not in REVIEW_CLICK_CASE_CATEGORIES and not task_id:
         raise ValueError("请选择关联任务。")
     if not point or len(point) > 1200:
         raise ValueError("请填写不超过 1200 个字符的案例要点。")
@@ -894,7 +896,7 @@ class Handler(SimpleHTTPRequestHandler):
             fields, uploads = parsed
             try:
                 values = normalize_review_case(fields)
-                values["task"] = review_case_task(data, values["task_id"])
+                values["task"] = review_case_task(data, values["task_id"]) if values["task_id"] else {}
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -1221,7 +1223,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             try:
                 values = normalize_review_case(payload)
-                values["task"] = review_case_task(data, values["task_id"])
+                values["task"] = review_case_task(data, values["task_id"]) if values["task_id"] else {}
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
