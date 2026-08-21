@@ -22,10 +22,19 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT.parent / "work" / "ai-visual-shared-data.json"
 REVIEW_UPLOAD_DIR = ROOT.parent / "work" / "review-imports"
+REVIEW_CASE_IMAGE_DIR = ROOT.parent / "work" / "review-case-images"
 SESSIONS: dict[str, tuple[str, float]] = {}
 SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_REVIEW_CASE_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_REVIEW_CASE_IMAGE_BYTES = 4 * 1024 * 1024
+MAX_REVIEW_CASE_IMAGES = 6
+REVIEW_CASE_IMAGE_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
 DEFAULT_IMAGE_REVIEW_METRICS = (
     {"id": "domestic_stay", "group": "国内渠道", "label": "平均停留时长", "unit": "秒", "compare": "gte", "target": "18"},
@@ -100,15 +109,16 @@ def password_valid(password: str, user: dict) -> bool:
 
 def read_data() -> dict:
     if not DATA_FILE.exists():
-        return {"users": [], "tasks": [], "review_uploads": []}
+        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": []}
     try:
         data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         data.setdefault("users", [])
         data.setdefault("tasks", [])
         data.setdefault("review_uploads", [])
+        data.setdefault("review_cases", [])
         return data
     except (json.JSONDecodeError, OSError):
-        return {"users": [], "tasks": [], "review_uploads": []}
+        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": []}
 
 
 def write_data(data: dict) -> None:
@@ -128,6 +138,52 @@ def active_users(data: dict) -> list[dict]:
 
 def user_by_name(data: dict, name: str) -> dict | None:
     return next((user for user in active_users(data) if user["name"] == name), None)
+
+
+def normalize_review_case(payload: dict) -> dict:
+    month = str(payload.get("month", "")).strip()
+    category = str(payload.get("category", "")).strip()
+    title = str(payload.get("title", "")).strip()
+    channel = str(payload.get("channel", "")).strip()
+    verify_date = str(payload.get("verify_date", "")).strip()
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise ValueError("请选择正确的案例月份。")
+    if category not in {"excellent", "improvement"}:
+        raise ValueError("案例类型不正确。")
+    if channel not in REVIEW_METRIC_GROUPS:
+        raise ValueError("请选择国内或海外渠道。")
+    if not title or len(title) > 80:
+        raise ValueError("请填写不超过 80 个字符的案例名称。")
+    if verify_date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", verify_date):
+        raise ValueError("验证时间格式不正确。")
+    values = {
+        "month": month,
+        "category": category,
+        "title": title,
+        "channel": channel,
+        "task": str(payload.get("task", "")).strip(),
+        "metrics": str(payload.get("metrics", "")).strip(),
+        "summary": str(payload.get("summary", "")).strip(),
+        "action": str(payload.get("action", "")).strip(),
+        "owner": str(payload.get("owner", "")).strip(),
+        "verify_date": verify_date,
+    }
+    if not values["summary"]:
+        raise ValueError("请填写案例结论。")
+    limits = {"task": 120, "metrics": 600, "summary": 2000, "action": 2000, "owner": 60}
+    if any(len(values[key]) > limit for key, limit in limits.items()):
+        raise ValueError("案例文字内容过长，请精简后再保存。")
+    return values
+
+
+def valid_review_case_image(mime_type: str, content: bytes) -> bool:
+    if mime_type == "image/jpeg":
+        return content.startswith(b"\xff\xd8\xff")
+    if mime_type == "image/png":
+        return content.startswith(b"\x89PNG\r\n\x1a\n")
+    if mime_type == "image/webp":
+        return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP"
+    return False
 
 
 def user_by_id(data: dict, user_id: str) -> dict | None:
@@ -294,6 +350,38 @@ class Handler(SimpleHTTPRequestHandler):
                 fields[name] = payload.decode("utf-8", errors="replace").strip()
         return fields, uploaded
 
+    def read_review_case_upload(self) -> tuple[dict[str, str], list[tuple[str, str, bytes]]] | None:
+        """Parse a small set of case images plus text fields."""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self.send_json({"error": "请使用案例图片上传格式。"}, HTTPStatus.BAD_REQUEST)
+            return None
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            size = -1
+        if size <= 0 or size > MAX_REVIEW_CASE_UPLOAD_BYTES:
+            self.send_json({"error": "案例上传内容不能为空且总大小不能超过 12 MB。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return None
+        try:
+            message = BytesParser(policy=default).parsebytes(
+                f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + self.rfile.read(size)
+            )
+        except Exception:
+            self.send_json({"error": "无法读取案例上传内容。"}, HTTPStatus.BAD_REQUEST)
+            return None
+        fields: dict[str, str] = {}
+        images: list[tuple[str, str, bytes]] = []
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            filename = part.get_filename()
+            payload = part.get_payload(decode=True) or b""
+            if filename:
+                images.append((Path(filename).name, part.get_content_type(), payload))
+            elif name:
+                fields[name] = payload.decode("utf-8", errors="replace").strip()
+        return fields, images
+
     def current_user(self, data: dict | None = None) -> dict | None:
         data = data or read_data()
         cookie = SimpleCookie(self.headers.get("Cookie"))
@@ -398,6 +486,54 @@ class Handler(SimpleHTTPRequestHandler):
                     "video_notes": {"anomaly": str(video_notes.get("anomaly", "")), "improvement": str(video_notes.get("improvement", ""))},
                 })
             return
+        if path == "/api/review-cases":
+            user, data = self.require_user(data)
+            if user:
+                query = parse_qs(urlparse(self.path).query)
+                month = str(query.get("month", [datetime.now().strftime("%Y-%m")])[0])
+                if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                    self.send_json({"error": "案例月份格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                cases = [item for item in data.get("review_cases", []) if item.get("month") == month]
+                cases.sort(key=lambda item: item.get("updated_at", item.get("created_at", "")), reverse=True)
+                self.send_json({"month": month, "cases": cases})
+            return
+        if path.startswith("/api/review-case-images/"):
+            user, data = self.require_user(data)
+            if not user:
+                return
+            image_id = path.rsplit("/", 1)[-1]
+            if not re.fullmatch(r"[a-f0-9]{24}", image_id):
+                self.send_json({"error": "案例图片不存在。"}, HTTPStatus.NOT_FOUND)
+                return
+            image = next(
+                (
+                    image
+                    for case in data.get("review_cases", [])
+                    for image in case.get("images", [])
+                    if image.get("id") == image_id
+                ),
+                None,
+            )
+            if not image:
+                self.send_json({"error": "案例图片不存在。"}, HTTPStatus.NOT_FOUND)
+                return
+            suffix = str(image.get("suffix", ""))
+            if suffix not in set(REVIEW_CASE_IMAGE_TYPES.values()):
+                self.send_json({"error": "案例图片不存在。"}, HTTPStatus.NOT_FOUND)
+                return
+            file_path = REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}"
+            if not file_path.is_file():
+                self.send_json({"error": "案例图片文件缺失。"}, HTTPStatus.NOT_FOUND)
+                return
+            content = file_path.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", image.get("mime", "application/octet-stream"))
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "private, max-age=300")
+            self.end_headers()
+            self.wfile.write(content)
+            return
         if path.startswith("/inspiration-assets/"):
             # These are static thumbnails used by the browser after the page is
             # rendered.  Keep them available so image loading is not coupled to
@@ -453,6 +589,62 @@ class Handler(SimpleHTTPRequestHandler):
             data.setdefault("review_uploads", []).append(record)
             write_data(data)
             self.send_json({"upload": record}, HTTPStatus.CREATED)
+            return
+        if path == "/api/review-cases":
+            data = read_data()
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            parsed = self.read_review_case_upload()
+            if not parsed:
+                return
+            fields, uploads = parsed
+            try:
+                values = normalize_review_case(fields)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            if not 1 <= len(uploads) <= MAX_REVIEW_CASE_IMAGES:
+                self.send_json({"error": f"每个案例请上传 1 至 {MAX_REVIEW_CASE_IMAGES} 张图片。"}, HTTPStatus.BAD_REQUEST)
+                return
+            prepared = []
+            for filename, mime_type, content in uploads:
+                if (
+                    mime_type not in REVIEW_CASE_IMAGE_TYPES
+                    or not content
+                    or len(content) > MAX_REVIEW_CASE_IMAGE_BYTES
+                    or not valid_review_case_image(mime_type, content)
+                ):
+                    self.send_json({"error": "仅支持单张不超过 4 MB 的 JPG、PNG 或 WEBP 图片。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                prepared.append((filename[:120], mime_type, REVIEW_CASE_IMAGE_TYPES[mime_type], content))
+            REVIEW_CASE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+            images = []
+            written_paths = []
+            try:
+                for filename, mime_type, suffix, content in prepared:
+                    image_id = secrets.token_hex(12)
+                    file_path = REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}"
+                    file_path.write_bytes(content)
+                    written_paths.append(file_path)
+                    images.append({"id": image_id, "name": filename, "mime": mime_type, "suffix": suffix})
+            except OSError:
+                for file_path in written_paths:
+                    file_path.unlink(missing_ok=True)
+                self.send_json({"error": "案例图片保存失败。"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            created_at = now()
+            record = {
+                "id": secrets.token_hex(12),
+                **values,
+                "images": images,
+                "created_by": public_user(admin),
+                "created_at": created_at,
+                "updated_at": created_at,
+            }
+            data.setdefault("review_cases", []).append(record)
+            write_data(data)
+            self.send_json({"case": record}, HTTPStatus.CREATED)
             return
         payload = self.read_json()
         if payload is None:
@@ -717,6 +909,29 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_same_origin():
             return
         path = urlparse(self.path).path
+        if path.startswith("/api/review-cases/"):
+            admin, data = self.require_admin()
+            if not admin:
+                return
+            case_id = path.rsplit("/", 1)[-1]
+            case = next((item for item in data.get("review_cases", []) if item.get("id") == case_id), None)
+            if not case:
+                self.send_json({"error": "未找到该复盘案例。"}, HTTPStatus.NOT_FOUND)
+                return
+            payload = self.read_json()
+            if payload is None:
+                return
+            try:
+                values = normalize_review_case(payload)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            case.update(values)
+            case["updated_by"] = public_user(admin)
+            case["updated_at"] = now()
+            write_data(data)
+            self.send_json({"case": case})
+            return
         if not path.startswith("/api/users/"):
             self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
             return
@@ -759,6 +974,29 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_same_origin():
             return
         path = urlparse(self.path).path
+        if path.startswith("/api/review-cases/"):
+            admin, data = self.require_admin()
+            if not admin:
+                return
+            case_id = path.rsplit("/", 1)[-1]
+            cases = data.get("review_cases", [])
+            case = next((item for item in cases if item.get("id") == case_id), None)
+            if not case:
+                self.send_json({"error": "未找到该复盘案例。"}, HTTPStatus.NOT_FOUND)
+                return
+            allowed_suffixes = set(REVIEW_CASE_IMAGE_TYPES.values())
+            for image in case.get("images", []):
+                image_id = str(image.get("id", ""))
+                suffix = str(image.get("suffix", ""))
+                if re.fullmatch(r"[0-9a-f]{24}", image_id) and suffix in allowed_suffixes:
+                    try:
+                        (REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}").unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            data["review_cases"] = [item for item in cases if item.get("id") != case_id]
+            write_data(data)
+            self.send_json({"ok": True})
+            return
         if not path.startswith("/api/users/"):
             self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
             return
