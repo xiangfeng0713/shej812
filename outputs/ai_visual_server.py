@@ -331,6 +331,7 @@ def normalize_review_case(payload: dict) -> dict:
     category = str(payload.get("category", "")).strip()
     media_type = str(payload.get("media_type", "image")).strip()
     task_id = str(payload.get("task_id", "")).strip()
+    click_rate = str(payload.get("click_rate", "")).strip()
     point = str(payload.get("point", "")).strip()
     try:
         slot = int(payload.get("slot", 0))
@@ -346,6 +347,10 @@ def normalize_review_case(payload: dict) -> dict:
         _, allowed_slots = REVIEW_CLICK_CASE_CATEGORIES[category]
         if media_type != "image" or slot not in allowed_slots:
             raise ValueError("点击率作品仅支持对应卡位的图片上传。")
+        matched_rate = re.fullmatch(r"(100(?:\.0{1,2})?|(?:\d{1,2})(?:\.\d{1,2})?)%?", click_rate)
+        if not matched_rate:
+            raise ValueError("请填写 0% 到 100% 的真实点击率，最多保留两位小数。")
+        click_rate = f"{matched_rate.group(1)}%"
     elif (media_type == "image" and slot not in range(1, 6)) or (media_type == "video" and slot != 6):
         raise ValueError("案例卡位不正确。")
     if task_id and not re.fullmatch(r"[0-9a-f]{20}", task_id):
@@ -354,7 +359,7 @@ def normalize_review_case(payload: dict) -> dict:
         raise ValueError("请选择关联任务。")
     if not point or len(point) > 1200:
         raise ValueError("请填写不超过 1200 个字符的案例要点。")
-    return {"month": month, "category": category, "media_type": media_type, "slot": slot, "task_id": task_id, "point": point}
+    return {"month": month, "category": category, "media_type": media_type, "slot": slot, "task_id": task_id, "click_rate": click_rate if category in REVIEW_CLICK_CASE_CATEGORIES else "", "point": point}
 
 
 def review_case_task(data: dict, task_id: str) -> dict:
