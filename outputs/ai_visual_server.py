@@ -184,12 +184,31 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("X-Permitted-Cross-Domain-Policies", "none")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
         )
         super().end_headers()
+
+    def list_directory(self, path: str):
+        """Never expose a browsable file list on the LAN service."""
+        self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
+        return None
+
+    def require_same_origin(self) -> bool:
+        """Reject browser requests posted from a different website (CSRF guard)."""
+        origin = self.headers.get("Origin", "")
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        if parsed.scheme not in {"http", "https"} or parsed.netloc != self.headers.get("Host", ""):
+            self.send_json({"error": "不允许跨站请求。"}, HTTPStatus.FORBIDDEN)
+            return False
+        return True
 
     def send_json(self, body: dict, status: HTTPStatus = HTTPStatus.OK, cookie: str | None = None):
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -270,12 +289,20 @@ class Handler(SimpleHTTPRequestHandler):
                 ]
                 self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks, "processed_tasks": processed_tasks})
             return
-        if path not in {"/", "/ai-starrail-design-console.html"} and not path.startswith("/inspiration-assets/"):
+        if path.startswith("/inspiration-assets/"):
+            user, data = self.require_user(data)
+            if not user:
+                return
+            super().do_GET()
+            return
+        if path not in {"/", "/ai-starrail-design-console.html"}:
             self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
             return
         super().do_GET()
 
     def do_POST(self):
+        if not self.require_same_origin():
+            return
         path = urlparse(self.path).path
         payload = self.read_json()
         if payload is None:
@@ -421,6 +448,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
 
     def do_PUT(self):
+        if not self.require_same_origin():
+            return
         path = urlparse(self.path).path
         if not path.startswith("/api/tasks/"):
             self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
@@ -461,6 +490,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"task": task})
 
     def do_PATCH(self):
+        if not self.require_same_origin():
+            return
         path = urlparse(self.path).path
         if not path.startswith("/api/users/"):
             self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
@@ -501,6 +532,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"user": public_user(user)})
 
     def do_DELETE(self):
+        if not self.require_same_origin():
+            return
         path = urlparse(self.path).path
         if not path.startswith("/api/users/"):
             self.send_json({"error": "接口不存在。"}, HTTPStatus.NOT_FOUND)
