@@ -125,7 +125,7 @@ def password_valid(password: str, user: dict) -> bool:
 
 def read_data() -> dict:
     if not DATA_FILE.exists():
-        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": []}
+        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": [], "review_click_editor_ids": []}
     try:
         data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         data.setdefault("users", [])
@@ -133,9 +133,10 @@ def read_data() -> dict:
         data.setdefault("review_uploads", [])
         data.setdefault("review_cases", [])
         data.setdefault("review_case_editor_ids", [])
+        data.setdefault("review_click_editor_ids", [])
         return data
     except (json.JSONDecodeError, OSError):
-        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": []}
+        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": [], "review_click_editor_ids": []}
 
 
 def write_data(data: dict) -> None:
@@ -616,6 +617,18 @@ class Handler(SimpleHTTPRequestHandler):
             return None, data
         return user, data
 
+    def can_edit_review_case_category(self, user: dict, data: dict, category: str) -> bool:
+        if user.get("is_admin"):
+            return True
+        permission_key = "review_click_editor_ids" if category in REVIEW_CLICK_CASE_CATEGORIES else "review_case_editor_ids"
+        return user.get("id") in data.get(permission_key, [])
+
+    def require_review_case_category_editor(self, user: dict, data: dict, category: str) -> bool:
+        if self.can_edit_review_case_category(user, data, category):
+            return True
+        self.send_json({"error": "当前账号没有此区域的上传与维护权限。"}, HTTPStatus.FORBIDDEN)
+        return False
+
     def do_GET(self):
         path = urlparse(self.path).path
         data = read_data()
@@ -705,6 +718,16 @@ class Handler(SimpleHTTPRequestHandler):
                     for user_id in data.get("review_case_editor_ids", [])
                     if user_by_id(data, user_id)
                 ]
+                self.send_json({
+                    "editor_ids": editor_ids,
+                    "can_edit": bool(user.get("is_admin") or user.get("id") in editor_ids),
+                    "can_manage": bool(user.get("is_admin")),
+                })
+            return
+        if path == "/api/review-click-permissions":
+            user, data = self.require_user(data)
+            if user:
+                editor_ids = [user_id for user_id in data.get("review_click_editor_ids", []) if user_by_id(data, user_id)]
                 self.send_json({
                     "editor_ids": editor_ids,
                     "can_edit": bool(user.get("is_admin") or user.get("id") in editor_ids),
@@ -822,6 +845,24 @@ class Handler(SimpleHTTPRequestHandler):
             write_data(data)
             self.send_json({"editor_ids": editor_ids, "can_edit": True, "can_manage": True})
             return
+        if path == "/api/review-click-permissions":
+            data = read_data()
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            payload = self.read_json()
+            if payload is None:
+                return
+            incoming = payload.get("editor_ids", [])
+            if not isinstance(incoming, list) or len(incoming) > len(data.get("users", [])):
+                self.send_json({"error": "授权账号数据不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            active_ids = {user["id"] for user in active_users(data) if not user.get("is_admin")}
+            editor_ids = list(dict.fromkeys(str(user_id) for user_id in incoming if str(user_id) in active_ids))
+            data["review_click_editor_ids"] = editor_ids
+            write_data(data)
+            self.send_json({"editor_ids": editor_ids, "can_edit": True, "can_manage": True})
+            return
         if path == "/api/review-uploads":
             data = read_data()
             admin, data = self.require_admin(data)
@@ -887,7 +928,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/review-cases":
             data = read_data()
-            editor, data = self.require_review_case_editor(data)
+            editor, data = self.require_user(data)
             if not editor:
                 return
             parsed = self.read_review_case_upload()
@@ -899,6 +940,8 @@ class Handler(SimpleHTTPRequestHandler):
                 values["task"] = review_case_task(data, values["task_id"]) if values["task_id"] else {}
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            if not self.require_review_case_category_editor(editor, data, values["category"]):
                 return
             occupied = any(
                 item.get("month") == values["month"]
@@ -1210,7 +1253,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         if path.startswith("/api/review-cases/"):
-            editor, data = self.require_review_case_editor()
+            editor, data = self.require_user()
             if not editor:
                 return
             case_id = path.rsplit("/", 1)[-1]
@@ -1226,6 +1269,8 @@ class Handler(SimpleHTTPRequestHandler):
                 values["task"] = review_case_task(data, values["task_id"]) if values["task_id"] else {}
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            if not self.require_review_case_category_editor(editor, data, case.get("category", "")) or not self.require_review_case_category_editor(editor, data, values["category"]):
                 return
             occupied = any(
                 item.get("id") != case_id
@@ -1287,7 +1332,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         if path.startswith("/api/review-cases/"):
-            editor, data = self.require_review_case_editor()
+            editor, data = self.require_user()
             if not editor:
                 return
             case_id = path.rsplit("/", 1)[-1]
@@ -1295,6 +1340,8 @@ class Handler(SimpleHTTPRequestHandler):
             case = next((item for item in cases if item.get("id") == case_id), None)
             if not case:
                 self.send_json({"error": "未找到该复盘案例。"}, HTTPStatus.NOT_FOUND)
+                return
+            if not self.require_review_case_category_editor(editor, data, case.get("category", "")):
                 return
             allowed_suffixes = {*REVIEW_CASE_IMAGE_TYPES.values(), *REVIEW_CASE_VIDEO_TYPES.values()}
             for image in case.get("images", []):
