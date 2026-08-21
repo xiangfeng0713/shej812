@@ -6,9 +6,12 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timezone
+from email.parser import BytesParser
+from email.policy import default
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -18,9 +21,12 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT.parent / "work" / "ai-visual-shared-data.json"
+REVIEW_UPLOAD_DIR = ROOT.parent / "work" / "review-imports"
 SESSIONS: dict[str, tuple[str, float]] = {}
 SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
+MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
+REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_BLOCK_SECONDS = 15 * 60
@@ -76,14 +82,15 @@ def password_valid(password: str, user: dict) -> bool:
 
 def read_data() -> dict:
     if not DATA_FILE.exists():
-        return {"users": [], "tasks": []}
+        return {"users": [], "tasks": [], "review_uploads": []}
     try:
         data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         data.setdefault("users", [])
         data.setdefault("tasks", [])
+        data.setdefault("review_uploads", [])
         return data
     except (json.JSONDecodeError, OSError):
-        return {"users": [], "tasks": []}
+        return {"users": [], "tasks": [], "review_uploads": []}
 
 
 def write_data(data: dict) -> None:
@@ -236,6 +243,39 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": "请求格式错误。"}, HTTPStatus.BAD_REQUEST)
             return None
 
+    def read_review_upload(self) -> tuple[dict[str, str], tuple[str, bytes] | None] | None:
+        """Parse one small admin-only spreadsheet upload without serving it back."""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            self.send_json({"error": "请使用文件上传格式。"}, HTTPStatus.BAD_REQUEST)
+            return None
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            size = -1
+        if size <= 0 or size > MAX_REVIEW_UPLOAD_BYTES:
+            self.send_json({"error": "上传文件不能为空且不能超过 5 MB。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return None
+        raw = self.rfile.read(size)
+        try:
+            message = BytesParser(policy=default).parsebytes(
+                f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + raw
+            )
+        except Exception:
+            self.send_json({"error": "无法读取上传文件。"}, HTTPStatus.BAD_REQUEST)
+            return None
+        fields: dict[str, str] = {}
+        uploaded: tuple[str, bytes] | None = None
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            filename = part.get_filename()
+            payload = part.get_payload(decode=True) or b""
+            if filename:
+                uploaded = (Path(filename).name, payload)
+            elif name:
+                fields[name] = payload.decode("utf-8", errors="replace").strip()
+        return fields, uploaded
+
     def current_user(self, data: dict | None = None) -> dict | None:
         data = data or read_data()
         cookie = SimpleCookie(self.headers.get("Cookie"))
@@ -289,6 +329,12 @@ class Handler(SimpleHTTPRequestHandler):
                 ]
                 self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks, "processed_tasks": processed_tasks})
             return
+        if path == "/api/review-uploads":
+            user, data = self.require_user(data)
+            if user:
+                uploads = data.get("review_uploads", [])[-20:]
+                self.send_json({"uploads": list(reversed(uploads))})
+            return
         if path.startswith("/inspiration-assets/"):
             # These are static thumbnails used by the browser after the page is
             # rendered.  Keep them available so image loading is not coupled to
@@ -304,6 +350,47 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_same_origin():
             return
         path = urlparse(self.path).path
+        if path == "/api/review-uploads":
+            data = read_data()
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            parsed = self.read_review_upload()
+            if not parsed:
+                return
+            fields, uploaded = parsed
+            if not uploaded:
+                self.send_json({"error": "请选择 Excel 或 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
+                return
+            upload_type = fields.get("type", "")
+            month = fields.get("month", "")
+            filename, content = uploaded
+            suffix = Path(filename).suffix.lower()
+            if upload_type not in REVIEW_UPLOAD_TYPES or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请填写正确的复盘月份和数据类型。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if suffix not in {".xlsx", ".csv"} or not filename or len(filename) > 120:
+                self.send_json({"error": "仅支持文件名不超过 120 个字符的 XLSX 或 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if suffix == ".xlsx" and not content.startswith(b"PK"):
+                self.send_json({"error": "该 XLSX 文件格式无效。"}, HTTPStatus.BAD_REQUEST)
+                return
+            upload_id = secrets.token_hex(12)
+            REVIEW_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            (REVIEW_UPLOAD_DIR / f"{upload_id}{suffix}").write_bytes(content)
+            record = {
+                "id": upload_id,
+                "name": filename,
+                "type": upload_type,
+                "month": month,
+                "size": len(content),
+                "uploaded_by": public_user(admin),
+                "uploaded_at": now(),
+            }
+            data.setdefault("review_uploads", []).append(record)
+            write_data(data)
+            self.send_json({"upload": record}, HTTPStatus.CREATED)
+            return
         payload = self.read_json()
         if payload is None:
             return
