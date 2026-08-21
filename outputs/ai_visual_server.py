@@ -289,6 +289,11 @@ class Handler(SimpleHTTPRequestHandler):
                 ]
                 self.send_json({"tasks": data["tasks"], "my_tasks": my_tasks, "submitted_tasks": submitted_tasks, "processed_tasks": processed_tasks})
             return
+        # The sign-in page uses this non-sensitive brand mark before a session
+        # exists. All actual inspiration assets stay behind authentication.
+        if path == "/inspiration-assets/starrail-logo-reference.png":
+            super().do_GET()
+            return
         if path.startswith("/inspiration-assets/"):
             user, data = self.require_user(data)
             if not user:
