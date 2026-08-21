@@ -27,6 +27,7 @@ SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
 REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
+DEFAULT_IMAGE_REVIEW_TARGETS = {"stay": "18 秒", "roi": "4", "conversion": "4.5%"}
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_BLOCK_SECONDS = 15 * 60
@@ -335,6 +336,13 @@ class Handler(SimpleHTTPRequestHandler):
                 uploads = data.get("review_uploads", [])[-20:]
                 self.send_json({"uploads": list(reversed(uploads))})
             return
+        if path == "/api/review-settings":
+            user, data = self.require_user(data)
+            if user:
+                saved = data.get("review_settings", {}).get("image_targets", {})
+                targets = {key: str(saved.get(key, value)) for key, value in DEFAULT_IMAGE_REVIEW_TARGETS.items()}
+                self.send_json({"image_targets": targets})
+            return
         if path.startswith("/inspiration-assets/"):
             # These are static thumbnails used by the browser after the page is
             # rendered.  Keep them available so image loading is not coupled to
@@ -395,6 +403,22 @@ class Handler(SimpleHTTPRequestHandler):
         if payload is None:
             return
         data = read_data()
+        if path == "/api/review-settings":
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            incoming = payload.get("image_targets")
+            if not isinstance(incoming, dict):
+                self.send_json({"error": "请填写图片复盘目标值。"}, HTTPStatus.BAD_REQUEST)
+                return
+            targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
+            if any(not value or len(value) > 20 for value in targets.values()):
+                self.send_json({"error": "三个目标值均为必填，且每项不超过 20 个字符。"}, HTTPStatus.BAD_REQUEST)
+                return
+            data["review_settings"] = {"image_targets": targets, "updated_by": public_user(admin), "updated_at": now()}
+            write_data(data)
+            self.send_json({"image_targets": targets})
+            return
         if path == "/api/bootstrap":
             if data["users"]:
                 self.send_json({"error": "管理员已初始化。"}, HTTPStatus.CONFLICT)
