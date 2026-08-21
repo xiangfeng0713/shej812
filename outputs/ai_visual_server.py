@@ -4,12 +4,15 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import json
 import os
+import posixpath
 import re
 import secrets
 import time
-from datetime import datetime, timezone
+import zipfile
+from datetime import datetime, timedelta, timezone
 from email.parser import BytesParser
 from email.policy import default
 from http import HTTPStatus
@@ -17,6 +20,7 @@ from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from xml.etree import ElementTree
 
 
 ROOT = Path(__file__).resolve().parent
@@ -39,7 +43,9 @@ REVIEW_CASE_VIDEO_TYPES = {
     "video/mp4": ".mp4",
     "video/webm": ".webm",
 }
-REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
+REVIEW_UPLOAD_TYPE = "月度复盘全量数据"
+REVIEW_REQUIRED_SHEETS = {"导入说明", "图片数据表现", "AI产出复盘", "视频数据表现", "结论与行动"}
+MAX_REVIEW_XLSX_UNCOMPRESSED_BYTES = 30 * 1024 * 1024
 DEFAULT_IMAGE_REVIEW_METRICS = (
     {"id": "domestic_stay", "group": "国内渠道", "label": "平均停留时长", "unit": "秒", "compare": "gte", "target": "18"},
     {"id": "domestic_roi", "group": "国内渠道", "label": "店铺综合推广 ROI", "unit": "", "compare": "gte", "target": "4"},
@@ -131,6 +137,174 @@ def write_data(data: dict) -> None:
     temp = DATA_FILE.with_suffix(".tmp")
     temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(DATA_FILE)
+
+
+def xlsx_cell_text(cell: ElementTree.Element, shared_strings: list[str], namespace: dict[str, str]) -> str:
+    cell_type = cell.get("t", "")
+    if cell_type == "inlineStr":
+        return "".join(node.text or "" for node in cell.findall(".//main:t", namespace)).strip()
+    value = cell.find("main:v", namespace)
+    if value is None or value.text is None:
+        return ""
+    raw = value.text.strip()
+    if cell_type == "s":
+        try:
+            return shared_strings[int(raw)].strip()
+        except (ValueError, IndexError):
+            return ""
+    if cell_type == "b":
+        return "1" if raw == "1" else "0"
+    return raw
+
+
+def parse_xlsx_cells(content: bytes) -> dict[str, dict[str, str]]:
+    main_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    package_rel_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    namespace = {"main": main_ns, "rel": rel_ns}
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) > 250 or sum(item.file_size for item in members) > MAX_REVIEW_XLSX_UNCOMPRESSED_BYTES:
+                raise ValueError("复盘表格解压后体积异常，请使用标准模板并删除多余图片或附件。")
+            names = {item.filename for item in members}
+            if "xl/workbook.xml" not in names or "xl/_rels/workbook.xml.rels" not in names:
+                raise ValueError("该文件不是有效的复盘 XLSX 表格。")
+            shared_strings: list[str] = []
+            if "xl/sharedStrings.xml" in names:
+                shared_root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+                for item in shared_root.findall("main:si", namespace):
+                    shared_strings.append("".join(node.text or "" for node in item.findall(".//main:t", namespace)))
+            rel_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+            relationships = {
+                item.get("Id", ""): item.get("Target", "")
+                for item in rel_root.findall(f"{{{package_rel_ns}}}Relationship")
+            }
+            workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            sheets: dict[str, dict[str, str]] = {}
+            for item in workbook_root.findall("main:sheets/main:sheet", namespace):
+                sheet_name = item.get("name", "").strip()
+                relation_id = item.get(f"{{{rel_ns}}}id", "")
+                target = relationships.get(relation_id, "")
+                normalized = posixpath.normpath(target.lstrip("/"))
+                sheet_path = normalized if normalized.startswith("xl/") else f"xl/{normalized}"
+                if not sheet_name or sheet_path not in names or not sheet_path.startswith("xl/"):
+                    continue
+                sheet_root = ElementTree.fromstring(archive.read(sheet_path))
+                cells: dict[str, str] = {}
+                for cell in sheet_root.findall(".//main:sheetData/main:row/main:c", namespace):
+                    reference = str(cell.get("r", "")).upper()
+                    if reference:
+                        cells[reference] = xlsx_cell_text(cell, shared_strings, namespace)
+                sheets[sheet_name] = cells
+            return sheets
+    except (zipfile.BadZipFile, ElementTree.ParseError, KeyError) as error:
+        raise ValueError("该 XLSX 文件结构无效，请重新下载标准复盘模板填写。") from error
+
+
+def clean_metric_number(value: str) -> str:
+    return str(value or "").strip().replace(",", "").replace("，", "")
+
+
+def parse_review_metric_sheet(cells: dict[str, str], section: str) -> tuple[list[dict], dict[str, str], dict[str, str]]:
+    metrics: list[dict] = []
+    actuals: dict[str, str] = {}
+    metric_pattern = re.compile(r"\d{1,12}(?:\.\d{1,6})?")
+    compare_map = {">": "gt", ">=": "gte", "≥": "gte", "大于": "gt", "大于等于": "gte"}
+    for row in range(8, 60):
+        metric_id = cells.get(f"A{row}", "").strip()
+        group = cells.get(f"B{row}", "").strip()
+        label = cells.get(f"C{row}", "").strip()
+        if metric_id in {"数据异常说明", "后续改善方向"}:
+            break
+        if not metric_id or not label:
+            continue
+        compare = compare_map.get(cells.get(f"D{row}", "").strip(), "gte")
+        target = clean_metric_number(cells.get(f"E{row}", "")) or "xxxx"
+        unit = cells.get(f"F{row}", "").strip()
+        actual = clean_metric_number(cells.get(f"G{row}", ""))
+        if not re.fullmatch(r"[a-z0-9_]{3,40}", metric_id):
+            raise ValueError(f"{section}数据存在无法识别的指标编码：{metric_id}")
+        if group not in REVIEW_METRIC_GROUPS or len(label) > 40 or len(unit) > 10:
+            raise ValueError(f"{section}数据的渠道、指标名称或单位不正确：{label}")
+        if target.casefold() != "xxxx" and not metric_pattern.fullmatch(target):
+            raise ValueError(f"{section}指标“{label}”的目标值应为数字或 xxxx。")
+        if actual and not metric_pattern.fullmatch(actual):
+            raise ValueError(f"{section}指标“{label}”的当月实际值应为数字。")
+        metrics.append({"id": metric_id, "group": group, "label": label, "unit": unit, "compare": compare, "target": target})
+        actuals[metric_id] = actual
+    if not metrics or len(metrics) > MAX_REVIEW_METRICS:
+        raise ValueError(f"{section}数据须包含 1 至 {MAX_REVIEW_METRICS} 个有效指标。")
+    labels = {value: reference for reference, value in cells.items() if reference.startswith("A")}
+    anomaly_row = re.sub(r"\D", "", labels.get("数据异常说明", ""))
+    improvement_row = re.sub(r"\D", "", labels.get("后续改善方向", ""))
+    notes = {
+        "anomaly": cells.get(f"C{anomaly_row}", "").strip() if anomaly_row else "",
+        "improvement": cells.get(f"C{improvement_row}", "").strip() if improvement_row else "",
+    }
+    if any(len(value) > 2000 for value in notes.values()):
+        raise ValueError(f"{section}数据异常说明和改善方向每项不超过 2000 个字符。")
+    return metrics, actuals, notes
+
+
+def parse_review_ai_sheet(cells: dict[str, str]) -> dict:
+    result: dict[str, dict[str, str]] = {}
+    for row in range(8, 20):
+        kind = cells.get(f"A{row}", "").strip()
+        key = {"AI图片": "image", "AI视频": "video"}.get(kind)
+        if not key:
+            continue
+        result[key] = {
+            "generated": clean_metric_number(cells.get(f"B{row}", "")),
+            "adopted": clean_metric_number(cells.get(f"C{row}", "")),
+            "reusable": clean_metric_number(cells.get(f"E{row}", "")),
+            "feedback": cells.get(f"F{row}", "").strip()[:2000],
+        }
+    return result
+
+
+def parse_review_action_sheet(cells: dict[str, str]) -> dict:
+    summary = cells.get("A9", "").strip()[:4000]
+    actions = []
+    for row in range(17, 80):
+        due_date = cells.get(f"E{row}", "").strip()[:30]
+        if re.fullmatch(r"\d{5}(?:\.\d+)?", due_date):
+            due_date = (datetime(1899, 12, 30) + timedelta(days=float(due_date))).date().isoformat()
+        item = {
+            "id": cells.get(f"A{row}", "").strip()[:20],
+            "problem": cells.get(f"B{row}", "").strip()[:500],
+            "action": cells.get(f"C{row}", "").strip()[:500],
+            "owner": cells.get(f"D{row}", "").strip()[:80],
+            "due_date": due_date,
+            "acceptance": cells.get(f"F{row}", "").strip()[:500],
+            "status": cells.get(f"G{row}", "").strip()[:30],
+            "collaboration": cells.get(f"H{row}", "").strip()[:500],
+        }
+        if any(item[key] for key in ("problem", "action", "owner", "due_date", "acceptance", "collaboration")):
+            actions.append(item)
+    return {"summary": summary, "actions": actions[:30]}
+
+
+def parse_review_workbook(content: bytes, selected_month: str) -> dict:
+    sheets = parse_xlsx_cells(content)
+    missing = sorted(REVIEW_REQUIRED_SHEETS.difference(sheets))
+    if missing:
+        raise ValueError("复盘表格缺少工作表：" + "、".join(missing))
+    workbook_month = sheets["导入说明"].get("B5", "").strip()
+    if workbook_month and workbook_month != selected_month:
+        raise ValueError(f"表格月份为 {workbook_month}，与页面选择的 {selected_month} 不一致。")
+    image_metrics, image_actuals, image_notes = parse_review_metric_sheet(sheets["图片数据表现"], "图片")
+    video_metrics, video_actuals, video_notes = parse_review_metric_sheet(sheets["视频数据表现"], "视频")
+    return {
+        "image_metrics": image_metrics,
+        "image_actuals": image_actuals,
+        "image_notes": image_notes,
+        "video_metrics": video_metrics,
+        "video_actuals": video_actuals,
+        "video_notes": video_notes,
+        "ai_data": parse_review_ai_sheet(sheets["AI产出复盘"]),
+        "action_data": parse_review_action_sheet(sheets["结论与行动"]),
+    }
 
 
 def public_user(user: dict) -> dict:
@@ -497,6 +671,8 @@ class Handler(SimpleHTTPRequestHandler):
                 video_actuals = {metric["id"]: str(video_actuals.get(metric["id"], "")) for metric in video_metrics}
                 image_notes = settings.get("image_notes", {}).get(month, {})
                 video_notes = settings.get("video_notes", {}).get(month, {})
+                ai_data = settings.get("ai_data", {}).get(month, {})
+                action_data = settings.get("action_data", {}).get(month, {})
                 self.send_json({
                     "month": month,
                     "image_metrics": image_metrics,
@@ -505,6 +681,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "video_metrics": video_metrics,
                     "video_actuals": video_actuals,
                     "video_notes": {"anomaly": str(video_notes.get("anomaly", "")), "improvement": str(video_notes.get("improvement", ""))},
+                    "ai_data": ai_data if isinstance(ai_data, dict) else {},
+                    "action_data": action_data if isinstance(action_data, dict) else {},
                 })
             return
         if path == "/api/review-case-permissions":
@@ -642,36 +820,58 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             fields, uploaded = parsed
             if not uploaded:
-                self.send_json({"error": "请选择 Excel 或 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
+                self.send_json({"error": "请选择标准 XLSX 复盘表格。"}, HTTPStatus.BAD_REQUEST)
                 return
-            upload_type = fields.get("type", "")
             month = fields.get("month", "")
             filename, content = uploaded
             suffix = Path(filename).suffix.lower()
-            if upload_type not in REVIEW_UPLOAD_TYPES or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
-                self.send_json({"error": "请填写正确的复盘月份和数据类型。"}, HTTPStatus.BAD_REQUEST)
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请选择正确的复盘月份。"}, HTTPStatus.BAD_REQUEST)
                 return
-            if suffix not in {".xlsx", ".csv"} or not filename or len(filename) > 120:
-                self.send_json({"error": "仅支持文件名不超过 120 个字符的 XLSX 或 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
+            if suffix != ".xlsx" or not filename or len(filename) > 120:
+                self.send_json({"error": "一键同步仅支持文件名不超过 120 个字符的标准 XLSX 复盘表格。"}, HTTPStatus.BAD_REQUEST)
                 return
-            if suffix == ".xlsx" and not content.startswith(b"PK"):
+            if not content.startswith(b"PK"):
                 self.send_json({"error": "该 XLSX 文件格式无效。"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                imported = parse_review_workbook(content, month)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             upload_id = secrets.token_hex(12)
             REVIEW_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             (REVIEW_UPLOAD_DIR / f"{upload_id}{suffix}").write_bytes(content)
+            settings = data.setdefault("review_settings", {})
+            settings["image_metrics"] = imported["image_metrics"]
+            settings.setdefault("image_actuals", {})[month] = imported["image_actuals"]
+            settings.setdefault("image_notes", {})[month] = imported["image_notes"]
+            settings["video_metrics"] = imported["video_metrics"]
+            settings.setdefault("video_actuals", {})[month] = imported["video_actuals"]
+            settings.setdefault("video_notes", {})[month] = imported["video_notes"]
+            settings.setdefault("ai_data", {})[month] = imported["ai_data"]
+            settings.setdefault("action_data", {})[month] = imported["action_data"]
+            settings["updated_by"] = public_user(admin)
+            settings["updated_at"] = now()
+            synced = {
+                "image_metrics": len(imported["image_metrics"]),
+                "video_metrics": len(imported["video_metrics"]),
+                "ai_sections": len(imported["ai_data"]),
+                "actions": len(imported["action_data"].get("actions", [])),
+            }
             record = {
                 "id": upload_id,
                 "name": filename,
-                "type": upload_type,
+                "type": REVIEW_UPLOAD_TYPE,
                 "month": month,
                 "size": len(content),
+                "synced": synced,
                 "uploaded_by": public_user(admin),
                 "uploaded_at": now(),
             }
             data.setdefault("review_uploads", []).append(record)
             write_data(data)
-            self.send_json({"upload": record}, HTTPStatus.CREATED)
+            self.send_json({"upload": record, "synced": synced}, HTTPStatus.CREATED)
             return
         if path == "/api/review-cases":
             data = read_data()
