@@ -27,13 +27,17 @@ SESSIONS: dict[str, tuple[str, float]] = {}
 SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
-MAX_REVIEW_CASE_UPLOAD_BYTES = 12 * 1024 * 1024
+MAX_REVIEW_CASE_UPLOAD_BYTES = 55 * 1024 * 1024
 MAX_REVIEW_CASE_IMAGE_BYTES = 4 * 1024 * 1024
-MAX_REVIEW_CASE_IMAGES = 6
+MAX_REVIEW_CASE_VIDEO_BYTES = 50 * 1024 * 1024
 REVIEW_CASE_IMAGE_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
+}
+REVIEW_CASE_VIDEO_TYPES = {
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
 }
 REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
 DEFAULT_IMAGE_REVIEW_METRICS = (
@@ -143,37 +147,38 @@ def user_by_name(data: dict, name: str) -> dict | None:
 def normalize_review_case(payload: dict) -> dict:
     month = str(payload.get("month", "")).strip()
     category = str(payload.get("category", "")).strip()
-    title = str(payload.get("title", "")).strip()
-    channel = str(payload.get("channel", "")).strip()
-    verify_date = str(payload.get("verify_date", "")).strip()
+    media_type = str(payload.get("media_type", "image")).strip()
+    task_id = str(payload.get("task_id", "")).strip()
+    point = str(payload.get("point", "")).strip()
+    try:
+        slot = int(payload.get("slot", 0))
+    except (TypeError, ValueError):
+        slot = 0
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise ValueError("请选择正确的案例月份。")
     if category not in {"excellent", "improvement"}:
         raise ValueError("案例类型不正确。")
-    if channel not in REVIEW_METRIC_GROUPS:
-        raise ValueError("请选择国内或海外渠道。")
-    if not title or len(title) > 80:
-        raise ValueError("请填写不超过 80 个字符的案例名称。")
-    if verify_date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", verify_date):
-        raise ValueError("验证时间格式不正确。")
-    values = {
-        "month": month,
-        "category": category,
-        "title": title,
-        "channel": channel,
-        "task": str(payload.get("task", "")).strip(),
-        "metrics": str(payload.get("metrics", "")).strip(),
-        "summary": str(payload.get("summary", "")).strip(),
-        "action": str(payload.get("action", "")).strip(),
-        "owner": str(payload.get("owner", "")).strip(),
-        "verify_date": verify_date,
+    if media_type not in {"image", "video"}:
+        raise ValueError("案例媒体类型不正确。")
+    if (media_type == "image" and slot not in range(1, 6)) or (media_type == "video" and slot != 6):
+        raise ValueError("案例卡位不正确。")
+    if not re.fullmatch(r"[0-9a-f]{20}", task_id):
+        raise ValueError("请选择关联任务。")
+    if not point or len(point) > 1200:
+        raise ValueError("请填写不超过 1200 个字符的案例要点。")
+    return {"month": month, "category": category, "media_type": media_type, "slot": slot, "task_id": task_id, "point": point}
+
+
+def review_case_task(data: dict, task_id: str) -> dict:
+    task = next((item for item in data.get("tasks", []) if item.get("id") == task_id), None)
+    if not task:
+        raise ValueError("关联任务不存在，请重新选择。")
+    return {
+        "id": task["id"],
+        "name": str(task.get("name", "")),
+        "department": str(task.get("department", "")),
+        "type": str(task.get("type", "")),
     }
-    if not values["summary"]:
-        raise ValueError("请填写案例结论。")
-    limits = {"task": 120, "metrics": 600, "summary": 2000, "action": 2000, "owner": 60}
-    if any(len(values[key]) > limit for key, limit in limits.items()):
-        raise ValueError("案例文字内容过长，请精简后再保存。")
-    return values
 
 
 def valid_review_case_image(mime_type: str, content: bytes) -> bool:
@@ -183,6 +188,14 @@ def valid_review_case_image(mime_type: str, content: bytes) -> bool:
         return content.startswith(b"\x89PNG\r\n\x1a\n")
     if mime_type == "image/webp":
         return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP"
+    return False
+
+
+def valid_review_case_video(mime_type: str, content: bytes) -> bool:
+    if mime_type == "video/mp4":
+        return len(content) >= 12 and content[4:8] == b"ftyp"
+    if mime_type == "video/webm":
+        return content.startswith(b"\x1a\x45\xdf\xa3")
     return False
 
 
@@ -361,7 +374,7 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError:
             size = -1
         if size <= 0 or size > MAX_REVIEW_CASE_UPLOAD_BYTES:
-            self.send_json({"error": "案例上传内容不能为空且总大小不能超过 12 MB。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            self.send_json({"error": "案例上传内容不能为空且总大小不能超过 55 MB。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return None
         try:
             message = BytesParser(policy=default).parsebytes(
@@ -495,7 +508,7 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json({"error": "案例月份格式不正确。"}, HTTPStatus.BAD_REQUEST)
                     return
                 cases = [item for item in data.get("review_cases", []) if item.get("month") == month]
-                cases.sort(key=lambda item: item.get("updated_at", item.get("created_at", "")), reverse=True)
+                cases.sort(key=lambda item: (item.get("category", ""), int(item.get("slot", 0))))
                 self.send_json({"month": month, "cases": cases})
             return
         if path.startswith("/api/review-case-images/"):
@@ -519,7 +532,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "案例图片不存在。"}, HTTPStatus.NOT_FOUND)
                 return
             suffix = str(image.get("suffix", ""))
-            if suffix not in set(REVIEW_CASE_IMAGE_TYPES.values()):
+            if suffix not in {*REVIEW_CASE_IMAGE_TYPES.values(), *REVIEW_CASE_VIDEO_TYPES.values()}:
                 self.send_json({"error": "案例图片不存在。"}, HTTPStatus.NOT_FOUND)
                 return
             file_path = REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}"
@@ -601,43 +614,48 @@ class Handler(SimpleHTTPRequestHandler):
             fields, uploads = parsed
             try:
                 values = normalize_review_case(fields)
+                values["task"] = review_case_task(data, values["task_id"])
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
-            if not 1 <= len(uploads) <= MAX_REVIEW_CASE_IMAGES:
-                self.send_json({"error": f"每个案例请上传 1 至 {MAX_REVIEW_CASE_IMAGES} 张图片。"}, HTTPStatus.BAD_REQUEST)
+            occupied = any(
+                item.get("month") == values["month"]
+                and item.get("category") == values["category"]
+                and item.get("media_type", "image") == values["media_type"]
+                and int(item.get("slot", 0)) == values["slot"]
+                for item in data.get("review_cases", [])
+            )
+            if occupied:
+                self.send_json({"error": "该案例卡位已有内容，请直接编辑或先删除。"}, HTTPStatus.CONFLICT)
                 return
-            prepared = []
-            for filename, mime_type, content in uploads:
-                if (
-                    mime_type not in REVIEW_CASE_IMAGE_TYPES
-                    or not content
-                    or len(content) > MAX_REVIEW_CASE_IMAGE_BYTES
-                    or not valid_review_case_image(mime_type, content)
-                ):
+            if len(uploads) != 1:
+                self.send_json({"error": "每个案例卡位请上传 1 个图片或视频文件。"}, HTTPStatus.BAD_REQUEST)
+                return
+            filename, mime_type, content = uploads[0]
+            if values["media_type"] == "image":
+                if mime_type not in REVIEW_CASE_IMAGE_TYPES or not content or len(content) > MAX_REVIEW_CASE_IMAGE_BYTES or not valid_review_case_image(mime_type, content):
                     self.send_json({"error": "仅支持单张不超过 4 MB 的 JPG、PNG 或 WEBP 图片。"}, HTTPStatus.BAD_REQUEST)
                     return
-                prepared.append((filename[:120], mime_type, REVIEW_CASE_IMAGE_TYPES[mime_type], content))
+                suffix = REVIEW_CASE_IMAGE_TYPES[mime_type]
+            else:
+                if mime_type not in REVIEW_CASE_VIDEO_TYPES or not content or len(content) > MAX_REVIEW_CASE_VIDEO_BYTES or not valid_review_case_video(mime_type, content):
+                    self.send_json({"error": "仅支持不超过 50 MB 的 MP4 或 WEBM 视频。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                suffix = REVIEW_CASE_VIDEO_TYPES[mime_type]
             REVIEW_CASE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-            images = []
-            written_paths = []
+            media_id = secrets.token_hex(12)
+            file_path = REVIEW_CASE_IMAGE_DIR / f"{media_id}{suffix}"
             try:
-                for filename, mime_type, suffix, content in prepared:
-                    image_id = secrets.token_hex(12)
-                    file_path = REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}"
-                    file_path.write_bytes(content)
-                    written_paths.append(file_path)
-                    images.append({"id": image_id, "name": filename, "mime": mime_type, "suffix": suffix})
+                file_path.write_bytes(content)
             except OSError:
-                for file_path in written_paths:
-                    file_path.unlink(missing_ok=True)
-                self.send_json({"error": "案例图片保存失败。"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                file_path.unlink(missing_ok=True)
+                self.send_json({"error": "案例媒体文件保存失败。"}, HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
             created_at = now()
             record = {
                 "id": secrets.token_hex(12),
                 **values,
-                "images": images,
+                "images": [{"id": media_id, "name": Path(filename).name[:120], "mime": mime_type, "suffix": suffix}],
                 "created_by": public_user(admin),
                 "created_at": created_at,
                 "updated_at": created_at,
@@ -923,8 +941,20 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             try:
                 values = normalize_review_case(payload)
+                values["task"] = review_case_task(data, values["task_id"])
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            occupied = any(
+                item.get("id") != case_id
+                and item.get("month") == values["month"]
+                and item.get("category") == values["category"]
+                and item.get("media_type", "image") == values["media_type"]
+                and int(item.get("slot", 0)) == values["slot"]
+                for item in data.get("review_cases", [])
+            )
+            if occupied:
+                self.send_json({"error": "该案例卡位已有内容。"}, HTTPStatus.CONFLICT)
                 return
             case.update(values)
             case["updated_by"] = public_user(admin)
@@ -984,7 +1014,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not case:
                 self.send_json({"error": "未找到该复盘案例。"}, HTTPStatus.NOT_FOUND)
                 return
-            allowed_suffixes = set(REVIEW_CASE_IMAGE_TYPES.values())
+            allowed_suffixes = {*REVIEW_CASE_IMAGE_TYPES.values(), *REVIEW_CASE_VIDEO_TYPES.values()}
             for image in case.get("images", []):
                 image_id = str(image.get("id", ""))
                 suffix = str(image.get("suffix", ""))
