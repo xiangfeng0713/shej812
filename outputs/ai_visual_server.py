@@ -36,6 +36,13 @@ DEFAULT_IMAGE_REVIEW_TARGETS = {
     "overseas_221d_click": "0.8",
     "overseas_221d_conversion": "5.20",
 }
+DEFAULT_VIDEO_REVIEW_TARGETS = {
+    "domestic_completion": "18",
+    "domestic_stay": "20",
+    "domestic_ctr": "7",
+    "overseas_tk_views": "10000",
+    "overseas_gmv": "xxxx",
+}
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_BLOCK_SECONDS = 15 * 60
@@ -364,7 +371,17 @@ class Handler(SimpleHTTPRequestHandler):
                 }
                 actuals = settings.get("image_actuals", {}).get(month, {})
                 actuals = {key: str(actuals.get(key, "")) for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-                self.send_json({"month": month, "image_targets": targets, "image_actuals": actuals})
+                video_saved = settings.get("video_targets", {})
+                video_targets = {key: str(video_saved.get(key, value)).strip() for key, value in DEFAULT_VIDEO_REVIEW_TARGETS.items()}
+                video_actuals = settings.get("video_actuals", {}).get(month, {})
+                video_actuals = {key: str(video_actuals.get(key, "")) for key in DEFAULT_VIDEO_REVIEW_TARGETS}
+                self.send_json({
+                    "month": month,
+                    "image_targets": targets,
+                    "image_actuals": actuals,
+                    "video_targets": video_targets,
+                    "video_actuals": video_actuals,
+                })
             return
         if path.startswith("/inspiration-assets/"):
             # These are static thumbnails used by the browser after the page is
@@ -430,31 +447,58 @@ class Handler(SimpleHTTPRequestHandler):
             admin, data = self.require_admin(data)
             if not admin:
                 return
-            incoming = payload.get("image_targets")
-            actual_incoming = payload.get("image_actuals")
+            section = str(payload.get("section", "image")).strip()
             month = str(payload.get("month", "")).strip()
-            if not isinstance(incoming, dict) or not isinstance(actual_incoming, dict):
-                self.send_json({"error": "请填写图片复盘目标值和当月实际值。"}, HTTPStatus.BAD_REQUEST)
-                return
-            targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-            actuals = {key: str(actual_incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-            metric_pattern = re.compile(r"\d{1,6}(?:\.\d{1,4})?")
+            metric_pattern = re.compile(r"\d{1,12}(?:\.\d{1,4})?")
             if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
                 self.send_json({"error": "请选择正确的复盘月份。"}, HTTPStatus.BAD_REQUEST)
                 return
-            if any(not metric_pattern.fullmatch(value) for value in targets.values()):
-                self.send_json({"error": "七项目标值均须填写有效数字。"}, HTTPStatus.BAD_REQUEST)
-                return
-            if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
-                self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
-                return
             settings = data.setdefault("review_settings", {})
-            settings["image_targets"] = targets
-            settings.setdefault("image_actuals", {})[month] = actuals
+            if section == "image":
+                incoming = payload.get("image_targets")
+                actual_incoming = payload.get("image_actuals")
+                if not isinstance(incoming, dict) or not isinstance(actual_incoming, dict):
+                    self.send_json({"error": "请填写图片复盘目标值和当月实际值。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
+                actuals = {key: str(actual_incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
+                if any(not metric_pattern.fullmatch(value) for value in targets.values()):
+                    self.send_json({"error": "七项目标值均须填写有效数字。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
+                    self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                settings["image_targets"] = targets
+                settings.setdefault("image_actuals", {})[month] = actuals
+                response = {"month": month, "image_targets": targets, "image_actuals": actuals}
+            elif section == "video":
+                incoming = payload.get("video_targets")
+                actual_incoming = payload.get("video_actuals")
+                if not isinstance(incoming, dict) or not isinstance(actual_incoming, dict):
+                    self.send_json({"error": "请填写视频复盘目标值和当月实际值。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_VIDEO_REVIEW_TARGETS}
+                actuals = {key: str(actual_incoming.get(key, "")).strip() for key in DEFAULT_VIDEO_REVIEW_TARGETS}
+                if any(
+                    not metric_pattern.fullmatch(value)
+                    for key, value in targets.items()
+                    if not (key == "overseas_gmv" and value.casefold() == "xxxx")
+                ):
+                    self.send_json({"error": "视频目标值须填写有效数字；GMV 暂未确定时可填写 xxxx。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
+                    self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                settings["video_targets"] = targets
+                settings.setdefault("video_actuals", {})[month] = actuals
+                response = {"month": month, "video_targets": targets, "video_actuals": actuals}
+            else:
+                self.send_json({"error": "复盘数据类型不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
             settings["updated_by"] = public_user(admin)
             settings["updated_at"] = now()
             write_data(data)
-            self.send_json({"month": month, "image_targets": targets, "image_actuals": actuals})
+            self.send_json(response)
             return
         if path == "/api/bootstrap":
             if data["users"]:
