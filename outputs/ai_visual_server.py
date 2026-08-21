@@ -27,8 +27,8 @@ SESSIONS: dict[str, tuple[str, float]] = {}
 SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
-MAX_REVIEW_CASE_UPLOAD_BYTES = 55 * 1024 * 1024
-MAX_REVIEW_CASE_IMAGE_BYTES = 4 * 1024 * 1024
+MAX_REVIEW_CASE_UPLOAD_BYTES = 70 * 1024 * 1024
+MAX_REVIEW_CASE_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_REVIEW_CASE_VIDEO_BYTES = 50 * 1024 * 1024
 REVIEW_CASE_IMAGE_TYPES = {
     "image/jpeg": ".jpg",
@@ -374,7 +374,7 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError:
             size = -1
         if size <= 0 or size > MAX_REVIEW_CASE_UPLOAD_BYTES:
-            self.send_json({"error": "案例上传内容不能为空且总大小不能超过 55 MB。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            self.send_json({"error": "案例上传内容不能为空且总大小不能超过 70 MB。"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return None
         try:
             message = BytesParser(policy=default).parsebytes(
@@ -634,7 +634,7 @@ class Handler(SimpleHTTPRequestHandler):
             filename, mime_type, content = uploads[0]
             if values["media_type"] == "image":
                 if mime_type not in REVIEW_CASE_IMAGE_TYPES or not content or len(content) > MAX_REVIEW_CASE_IMAGE_BYTES or not valid_review_case_image(mime_type, content):
-                    self.send_json({"error": "仅支持单张不超过 4 MB 的 JPG、PNG 或 WEBP 图片。"}, HTTPStatus.BAD_REQUEST)
+                    self.send_json({"error": "仅支持单张不超过 15 MB 的 JPG、PNG 或 WEBP 图片。"}, HTTPStatus.BAD_REQUEST)
                     return
                 suffix = REVIEW_CASE_IMAGE_TYPES[mime_type]
             else:
