@@ -113,16 +113,17 @@ def password_valid(password: str, user: dict) -> bool:
 
 def read_data() -> dict:
     if not DATA_FILE.exists():
-        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": []}
+        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": []}
     try:
         data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         data.setdefault("users", [])
         data.setdefault("tasks", [])
         data.setdefault("review_uploads", [])
         data.setdefault("review_cases", [])
+        data.setdefault("review_case_editor_ids", [])
         return data
     except (json.JSONDecodeError, OSError):
-        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": []}
+        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": []}
 
 
 def write_data(data: dict) -> None:
@@ -422,6 +423,13 @@ class Handler(SimpleHTTPRequestHandler):
             return None, data
         return user, data
 
+    def require_review_case_editor(self, data: dict | None = None) -> tuple[dict | None, dict]:
+        user, data = self.require_user(data)
+        if user and not user.get("is_admin") and user.get("id") not in data.get("review_case_editor_ids", []):
+            self.send_json({"error": "当前账号没有案例上传与维护权限。"}, HTTPStatus.FORBIDDEN)
+            return None, data
+        return user, data
+
     def do_GET(self):
         path = urlparse(self.path).path
         data = read_data()
@@ -499,6 +507,20 @@ class Handler(SimpleHTTPRequestHandler):
                     "video_notes": {"anomaly": str(video_notes.get("anomaly", "")), "improvement": str(video_notes.get("improvement", ""))},
                 })
             return
+        if path == "/api/review-case-permissions":
+            user, data = self.require_user(data)
+            if user:
+                editor_ids = [
+                    user_id
+                    for user_id in data.get("review_case_editor_ids", [])
+                    if user_by_id(data, user_id)
+                ]
+                self.send_json({
+                    "editor_ids": editor_ids,
+                    "can_edit": bool(user.get("is_admin") or user.get("id") in editor_ids),
+                    "can_manage": bool(user.get("is_admin")),
+                })
+            return
         if path == "/api/review-cases":
             user, data = self.require_user(data)
             if user:
@@ -539,13 +561,43 @@ class Handler(SimpleHTTPRequestHandler):
             if not file_path.is_file():
                 self.send_json({"error": "案例图片文件缺失。"}, HTTPStatus.NOT_FOUND)
                 return
-            content = file_path.read_bytes()
-            self.send_response(HTTPStatus.OK)
+            file_size = file_path.stat().st_size
+            start, end = 0, file_size - 1
+            response_status = HTTPStatus.OK
+            range_header = self.headers.get("Range", "")
+            if range_header:
+                match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header.strip())
+                if not match:
+                    self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    self.send_header("Content-Range", f"bytes */{file_size}")
+                    self.end_headers()
+                    return
+                start = int(match.group(1))
+                end = min(int(match.group(2)) if match.group(2) else file_size - 1, file_size - 1)
+                if start > end or start >= file_size:
+                    self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    self.send_header("Content-Range", f"bytes */{file_size}")
+                    self.end_headers()
+                    return
+                response_status = HTTPStatus.PARTIAL_CONTENT
+            length = end - start + 1
+            self.send_response(response_status)
             self.send_header("Content-Type", image.get("mime", "application/octet-stream"))
-            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            if response_status == HTTPStatus.PARTIAL_CONTENT:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
             self.send_header("Cache-Control", "private, max-age=300")
             self.end_headers()
-            self.wfile.write(content)
+            with file_path.open("rb") as media_file:
+                media_file.seek(start)
+                remaining = length
+                while remaining:
+                    chunk = media_file.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
             return
         if path.startswith("/inspiration-assets/"):
             # These are static thumbnails used by the browser after the page is
@@ -562,6 +614,24 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_same_origin():
             return
         path = urlparse(self.path).path
+        if path == "/api/review-case-permissions":
+            data = read_data()
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            payload = self.read_json()
+            if payload is None:
+                return
+            incoming = payload.get("editor_ids", [])
+            if not isinstance(incoming, list) or len(incoming) > len(data.get("users", [])):
+                self.send_json({"error": "授权账号数据不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            active_ids = {user["id"] for user in active_users(data) if not user.get("is_admin")}
+            editor_ids = list(dict.fromkeys(str(user_id) for user_id in incoming if str(user_id) in active_ids))
+            data["review_case_editor_ids"] = editor_ids
+            write_data(data)
+            self.send_json({"editor_ids": editor_ids, "can_edit": True, "can_manage": True})
+            return
         if path == "/api/review-uploads":
             data = read_data()
             admin, data = self.require_admin(data)
@@ -605,8 +675,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/review-cases":
             data = read_data()
-            admin, data = self.require_admin(data)
-            if not admin:
+            editor, data = self.require_review_case_editor(data)
+            if not editor:
                 return
             parsed = self.read_review_case_upload()
             if not parsed:
@@ -656,7 +726,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "id": secrets.token_hex(12),
                 **values,
                 "images": [{"id": media_id, "name": Path(filename).name[:120], "mime": mime_type, "suffix": suffix}],
-                "created_by": public_user(admin),
+                "created_by": public_user(editor),
                 "created_at": created_at,
                 "updated_at": created_at,
             }
@@ -928,8 +998,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         if path.startswith("/api/review-cases/"):
-            admin, data = self.require_admin()
-            if not admin:
+            editor, data = self.require_review_case_editor()
+            if not editor:
                 return
             case_id = path.rsplit("/", 1)[-1]
             case = next((item for item in data.get("review_cases", []) if item.get("id") == case_id), None)
@@ -957,7 +1027,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "该案例卡位已有内容。"}, HTTPStatus.CONFLICT)
                 return
             case.update(values)
-            case["updated_by"] = public_user(admin)
+            case["updated_by"] = public_user(editor)
             case["updated_at"] = now()
             write_data(data)
             self.send_json({"case": case})
@@ -1005,8 +1075,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         if path.startswith("/api/review-cases/"):
-            admin, data = self.require_admin()
-            if not admin:
+            editor, data = self.require_review_case_editor()
+            if not editor:
                 return
             case_id = path.rsplit("/", 1)[-1]
             cases = data.get("review_cases", [])
