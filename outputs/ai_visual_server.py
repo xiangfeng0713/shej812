@@ -16,7 +16,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
@@ -27,7 +27,15 @@ SESSION_TTL_SECONDS = 8 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
 REVIEW_UPLOAD_TYPES = {"图片运营数据", "视频运营数据", "AI图片数据", "案例与行动"}
-DEFAULT_IMAGE_REVIEW_TARGETS = {"stay": "18 秒", "roi": "4", "conversion": "4.5%"}
+DEFAULT_IMAGE_REVIEW_TARGETS = {
+    "domestic_stay": "18",
+    "domestic_roi": "4",
+    "domestic_conversion": "4.5",
+    "overseas_221b_click": "0.8",
+    "overseas_221b_conversion": "5.20",
+    "overseas_221d_click": "0.8",
+    "overseas_221d_conversion": "5.20",
+}
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 10 * 60
 LOGIN_BLOCK_SECONDS = 15 * 60
@@ -339,9 +347,24 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/review-settings":
             user, data = self.require_user(data)
             if user:
-                saved = data.get("review_settings", {}).get("image_targets", {})
-                targets = {key: str(saved.get(key, value)) for key, value in DEFAULT_IMAGE_REVIEW_TARGETS.items()}
-                self.send_json({"image_targets": targets})
+                query = parse_qs(urlparse(self.path).query)
+                month = str(query.get("month", [datetime.now().strftime("%Y-%m")])[0])
+                if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                    self.send_json({"error": "复盘月份格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                settings = data.get("review_settings", {})
+                saved = settings.get("image_targets", {})
+                # Preserve the three domestic values created by the previous
+                # version while migrating to the complete seven-metric model.
+                legacy = {"stay": "domestic_stay", "roi": "domestic_roi", "conversion": "domestic_conversion"}
+                saved = {legacy.get(key, key): value for key, value in saved.items()}
+                targets = {
+                    key: str(saved.get(key, value)).replace("秒", "").replace("%", "").strip()
+                    for key, value in DEFAULT_IMAGE_REVIEW_TARGETS.items()
+                }
+                actuals = settings.get("image_actuals", {}).get(month, {})
+                actuals = {key: str(actuals.get(key, "")) for key in DEFAULT_IMAGE_REVIEW_TARGETS}
+                self.send_json({"month": month, "image_targets": targets, "image_actuals": actuals})
             return
         if path.startswith("/inspiration-assets/"):
             # These are static thumbnails used by the browser after the page is
@@ -408,16 +431,30 @@ class Handler(SimpleHTTPRequestHandler):
             if not admin:
                 return
             incoming = payload.get("image_targets")
-            if not isinstance(incoming, dict):
-                self.send_json({"error": "请填写图片复盘目标值。"}, HTTPStatus.BAD_REQUEST)
+            actual_incoming = payload.get("image_actuals")
+            month = str(payload.get("month", "")).strip()
+            if not isinstance(incoming, dict) or not isinstance(actual_incoming, dict):
+                self.send_json({"error": "请填写图片复盘目标值和当月实际值。"}, HTTPStatus.BAD_REQUEST)
                 return
             targets = {key: str(incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
-            if any(not value or len(value) > 20 for value in targets.values()):
-                self.send_json({"error": "三个目标值均为必填，且每项不超过 20 个字符。"}, HTTPStatus.BAD_REQUEST)
+            actuals = {key: str(actual_incoming.get(key, "")).strip() for key in DEFAULT_IMAGE_REVIEW_TARGETS}
+            metric_pattern = re.compile(r"\d{1,6}(?:\.\d{1,4})?")
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请选择正确的复盘月份。"}, HTTPStatus.BAD_REQUEST)
                 return
-            data["review_settings"] = {"image_targets": targets, "updated_by": public_user(admin), "updated_at": now()}
+            if any(not metric_pattern.fullmatch(value) for value in targets.values()):
+                self.send_json({"error": "七项目标值均须填写有效数字。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
+                self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
+                return
+            settings = data.setdefault("review_settings", {})
+            settings["image_targets"] = targets
+            settings.setdefault("image_actuals", {})[month] = actuals
+            settings["updated_by"] = public_user(admin)
+            settings["updated_at"] = now()
             write_data(data)
-            self.send_json({"image_targets": targets})
+            self.send_json({"month": month, "image_targets": targets, "image_actuals": actuals})
             return
         if path == "/api/bootstrap":
             if data["users"]:
