@@ -43,6 +43,12 @@ REVIEW_CASE_VIDEO_TYPES = {
     "video/mp4": ".mp4",
     "video/webm": ".webm",
 }
+REVIEW_CLICK_CASE_CATEGORIES = {
+    "domestic_high": ("国内渠道高点击率作品", {1, 2, 3}),
+    "domestic_low": ("国内渠道低点击率作品", {1, 2}),
+    "overseas_high": ("海外渠道高点击率作品", {1, 2, 3}),
+    "overseas_low": ("海外渠道低点击率作品", {1, 2}),
+}
 REVIEW_UPLOAD_TYPE = "月度复盘全量数据"
 REVIEW_REQUIRED_SHEETS = {"导入说明", "图片数据表现", "AI产出复盘", "视频数据表现", "结论与行动"}
 MAX_REVIEW_XLSX_UNCOMPRESSED_BYTES = 30 * 1024 * 1024
@@ -331,11 +337,15 @@ def normalize_review_case(payload: dict) -> dict:
         slot = 0
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise ValueError("请选择正确的案例月份。")
-    if category not in {"excellent", "improvement"}:
+    if category not in {"excellent", "improvement", *REVIEW_CLICK_CASE_CATEGORIES}:
         raise ValueError("案例类型不正确。")
     if media_type not in {"image", "video"}:
         raise ValueError("案例媒体类型不正确。")
-    if (media_type == "image" and slot not in range(1, 6)) or (media_type == "video" and slot != 6):
+    if category in REVIEW_CLICK_CASE_CATEGORIES:
+        _, allowed_slots = REVIEW_CLICK_CASE_CATEGORIES[category]
+        if media_type != "image" or slot not in allowed_slots:
+            raise ValueError("点击率作品仅支持对应卡位的图片上传。")
+    elif (media_type == "image" and slot not in range(1, 6)) or (media_type == "video" and slot != 6):
         raise ValueError("案例卡位不正确。")
     if not re.fullmatch(r"[0-9a-f]{20}", task_id):
         raise ValueError("请选择关联任务。")
