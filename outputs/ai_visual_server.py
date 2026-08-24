@@ -322,6 +322,20 @@ def active_users(data: dict) -> list[dict]:
     return [user for user in data["users"] if user.get("active", True)]
 
 
+def coop_designer_user_ids(data: dict) -> list[str]:
+    users = active_users(data)
+    active_ids = {user["id"] for user in users}
+    saved = data.get("coop_designer_user_ids")
+    if not isinstance(saved, list):
+        role_pattern = re.compile(r"(?:设计师|摄影师|剪辑师|渲染师)")
+        return [
+            user["id"]
+            for user in users
+            if user.get("is_admin") or role_pattern.search(str(user.get("tag", "")))
+        ]
+    return list(dict.fromkeys(str(user_id) for user_id in saved if str(user_id) in active_ids))
+
+
 def user_by_name(data: dict, name: str) -> dict | None:
     return next((user for user in active_users(data) if user["name"] == name), None)
 
@@ -649,6 +663,14 @@ class Handler(SimpleHTTPRequestHandler):
             if user:
                 self.send_json({"users": [public_user(item) for item in active_users(data)]})
             return
+        if path == "/api/coop-designer-roster":
+            user, data = self.require_user(data)
+            if user:
+                self.send_json({
+                    "user_ids": coop_designer_user_ids(data),
+                    "can_manage": bool(user.get("is_admin")),
+                })
+            return
         if path == "/api/tasks":
             user, data = self.require_user(data)
             if user:
@@ -831,6 +853,24 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_same_origin():
             return
         path = urlparse(self.path).path
+        if path == "/api/coop-designer-roster":
+            data = read_data()
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            payload = self.read_json()
+            if payload is None:
+                return
+            incoming = payload.get("user_ids", [])
+            if not isinstance(incoming, list) or len(incoming) > len(data.get("users", [])):
+                self.send_json({"error": "协助设计人员数据不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            active_ids = {user["id"] for user in active_users(data)}
+            user_ids = list(dict.fromkeys(str(user_id) for user_id in incoming if str(user_id) in active_ids))
+            data["coop_designer_user_ids"] = user_ids
+            write_data(data)
+            self.send_json({"user_ids": user_ids, "can_manage": True})
+            return
         if path == "/api/review-case-permissions":
             data = read_data()
             admin, data = self.require_admin(data)

@@ -483,6 +483,8 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 .coop-person-dialog-actions{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid #E7E8EA}
 .coop-person-dialog-actions button{min-height:34px;padding:6px 14px;border:1px solid #DBDCE0;border-radius:6px;background:#fff;color:#585858;font:13px "Microsoft YaHei",Arial,sans-serif;cursor:pointer}.coop-person-dialog-actions .confirm{border-color:#2962FF;background:#2962FF;color:#fff}.coop-person-dialog-actions .confirm.remove{border-color:#FE585B;background:#FE585B;color:#fff}.coop-person-dialog-actions .confirm:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:700px){.coop-admin-tools{justify-content:flex-start}}
+.coop-option:has(input:checked){border-color:#DBDCE0!important;background:#fff!important;box-shadow:none!important}
+.coop-option input[type="checkbox"]{-webkit-appearance:checkbox!important;appearance:auto!important;width:14px!important;height:14px!important;min-width:14px!important;margin:0!important;padding:0!important;border:0!important;border-radius:2px!important;background:transparent!important;box-shadow:none!important;accent-color:#2962FF}
 
 /* 2026-08-24 汇总页视口铺满与视频布局对齐 */
 #taskCenterSummaryHost>.dashboard-card{min-height:calc(100dvh - 150px)!important;margin-bottom:20px!important}
@@ -919,7 +921,7 @@ setInterval(()=>{
  picker.parentElement.insertBefore(tools,picker);
  const note=document.createElement('small');
  note.className='coop-admin-note';
- note.textContent='管理员可从账号管理人员中添加协助设计，也可删除当前已选人员。';
+ note.textContent='管理员可维护协助设计可选人员；勾选仅用于当前任务分配。';
  picker.insertAdjacentElement('afterend',note);
  const add=tools.querySelector('.coop-person-add');
  const remove=tools.querySelector('.coop-person-remove');
@@ -934,65 +936,108 @@ setInterval(()=>{
  const close=dialog.querySelector('.coop-person-dialog-close');
  const cancel=dialog.querySelector('.cancel');
  const confirmButton=dialog.querySelector('.confirm');
- let mode='add';
+ let mode='add',rosterLoaded=false,rosterUserIds=new Set(),rendering=false;
  const pickerInputs=()=>[...picker.querySelectorAll('.coop-option input')];
- const accountPeople=()=>sharedUsers.filter(person=>person.is_admin||designRole(person));
+ const accountPeople=()=>sharedUsers.filter(person=>person&&person.id&&person.name);
  const accountLabel=person=>typeof userOption==='function'?userOption(person):`${person.name}${person.tag?' · '+person.tag:''}`;
- const ensureAccountOptions=()=>{
-  const existing=new Set(pickerInputs().map(input=>input.value));
-  accountPeople().forEach(person=>{
-   if(existing.has(person.name))return;
-   const option=document.createElement('label');
-   option.className='coop-option';
-   option.innerHTML=`<input type="checkbox" value="${escapeHtml(person.name)}"><span>${escapeHtml(accountLabel(person))}</span>`;
-   picker.appendChild(option);
-  });
+ const rosterPeople=()=>accountPeople().filter(person=>rosterUserIds.has(person.id));
+ const renderPicker=()=>{
+  if(!rosterLoaded||rendering)return;
+  rendering=true;
+  const selected=new Set(pickerInputs().filter(input=>input.checked).map(input=>input.value));
+  const people=rosterPeople();
+  picker.innerHTML=people.length?people.map(person=>`<label class="coop-option"><input type="checkbox" value="${escapeHtml(person.name)}" ${selected.has(person.name)?'checked':''}><span>${escapeHtml(accountLabel(person))}</span></label>`).join(''):'<span class="coop-empty">暂无协助设计可选人员</span>';
+  pickerInputs().forEach(input=>input.disabled=!currentUser?.is_admin);
+  queueMicrotask(()=>{rendering=false;});
  };
  const closeDialog=()=>{dialog.hidden=true;list.innerHTML='';confirmButton.disabled=true;};
  const openDialog=nextMode=>{
   if(!currentUser?.is_admin){alert('仅管理员可以调整协助设计人员。');return;}
- mode=nextMode;
-  ensureAccountOptions();
-  const selected=new Set(pickerInputs().filter(input=>input.checked).map(input=>input.value));
-  const people=accountPeople().filter(person=>mode==='add'||selected.has(person.name));
+  mode=nextMode;
+  const people=accountPeople().filter(person=>mode==='add'?!rosterUserIds.has(person.id):rosterUserIds.has(person.id));
   title.textContent=mode==='add'?'添加协助设计人员':'删除协助设计人员';
-  tip.textContent=mode==='add'?'选择账号管理中尚未加入当前任务的人员。':'选择需要从当前任务中移除的协助设计人员。';
+  tip.textContent=mode==='add'?'选择账号管理中尚未加入协助设计选项的人员。':'选择需要从协助设计选项中删除的人员。';
   confirmButton.textContent=mode==='add'?'确认添加':'确认删除';
   confirmButton.classList.toggle('remove',mode==='remove');
-  list.innerHTML=people.length?people.map(person=>{const exists=mode==='add'&&selected.has(person.name);return `<label class="coop-person-dialog-option"><input type="radio" name="coop-person-manage" value="${escapeHtml(person.name)}" ${exists?'disabled':''}><span><b>${escapeHtml(person.name)}</b><small>${exists?'已添加到当前任务':escapeHtml(accountLabel(person).replace(person.name,'').replace(/^\s*·\s*/,'' )||person.username||'账号人员')}</small></span></label>`;}).join(''):`<div class="coop-person-dialog-empty">${mode==='add'?'账号管理中暂无符合岗位的人员':'当前没有已选协助人员'}</div>`;
+  list.innerHTML=people.length?people.map(person=>`<label class="coop-person-dialog-option"><input type="radio" name="coop-person-manage" value="${escapeHtml(person.id)}"><span><b>${escapeHtml(person.name)}</b><small>${escapeHtml(accountLabel(person).replace(person.name,'').replace(/^\s*·\s*/,'' )||person.username||'账号人员')}</small></span></label>`).join(''):`<div class="coop-person-dialog-empty">${mode==='add'?'账号管理中没有尚未加入的人员':'当前协助设计列表为空'}</div>`;
   confirmButton.disabled=true;
   dialog.hidden=false;
   list.querySelector('input')?.focus();
  };
  const sync=()=>{
- const admin=Boolean(currentUser?.is_admin);
-  ensureAccountOptions();
-  const options=pickerInputs();
+  const admin=Boolean(currentUser?.is_admin);
   tools.hidden=!admin;
   note.hidden=!admin;
-  options.forEach(input=>input.disabled=!admin);
+  pickerInputs().forEach(input=>input.disabled=!admin);
  };
- const setPerson=()=>{
- const selected=dialog.querySelector('input[name="coop-person-manage"]:checked');
+ const loadRoster=async()=>{
+  try{
+   const data=await sharedApi('/api/coop-designer-roster');
+   rosterUserIds=new Set(data.user_ids||[]);
+   rosterLoaded=true;
+   renderPicker();
+   sync();
+  }catch(error){
+   note.textContent=error.message;
+  }
+ };
+ const setPerson=async()=>{
+  const selected=dialog.querySelector('input[name="coop-person-manage"]:checked');
   if(!selected)return;
-  ensureAccountOptions();
-  const target=pickerInputs().find(input=>input.value===selected.value);
-  if(!target){alert('该账号未同步到协助设计师列表，请刷新账号数据后重试。');return;}
-  target.checked=mode==='add';
-  target.dispatchEvent(new Event('input',{bubbles:true}));
-  target.dispatchEvent(new Event('change',{bubbles:true}));
-  note.textContent=mode==='add'?`已添加 ${selected.value}，点击“确定”后保存分配。`:`已移除 ${selected.value}，点击“确定”后保存分配。`;
-  closeDialog();
+  const person=accountPeople().find(item=>item.id===selected.value);
+  if(!person)return;
+  const next=new Set(rosterUserIds);
+  if(mode==='add')next.add(person.id);else next.delete(person.id);
+  confirmButton.disabled=true;
+  try{
+   const saved=await sharedApi('/api/coop-designer-roster',{method:'POST',body:JSON.stringify({user_ids:[...next]})});
+   rosterUserIds=new Set(saved.user_ids||[]);
+   rosterLoaded=true;
+   renderPicker();
+   note.textContent=mode==='add'?`已将 ${person.name} 加入协助设计可选人员。`:`已将 ${person.name} 从协助设计可选人员中删除。`;
+   closeDialog();
+  }catch(error){
+   alert(error.message);
+   confirmButton.disabled=false;
+  }
  };
  add.onclick=()=>openDialog('add');
- remove.onclick=()=>openDialog('remove');
+ remove.onclick=async()=>{
+  if(!currentUser?.is_admin){alert('仅管理员可以调整协助设计人员。');return;}
+  const selectedNames=new Set(pickerInputs().filter(input=>input.checked).map(input=>input.value));
+  if(!selectedNames.size){alert('请先在下方协助设计选项中勾选要删除的人员。');return;}
+  const removed=rosterPeople().filter(person=>selectedNames.has(person.name));
+  const next=[...rosterUserIds].filter(userId=>!removed.some(person=>person.id===userId));
+  remove.disabled=true;
+  try{
+   const saved=await sharedApi('/api/coop-designer-roster',{method:'POST',body:JSON.stringify({user_ids:next})});
+   rosterUserIds=new Set(saved.user_ids||[]);
+   rosterLoaded=true;
+   renderPicker();
+   note.textContent=`已删除 ${removed.map(person=>person.name).join('、')}。`;
+  }catch(error){
+   alert(error.message);
+  }finally{
+   remove.disabled=false;
+  }
+ };
  list.onchange=()=>{confirmButton.disabled=!list.querySelector('input:checked');};
  confirmButton.onclick=setPerson;
  close.onclick=closeDialog;
  cancel.onclick=closeDialog;
  dialog.onclick=event=>{if(event.target===dialog)closeDialog();};
  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!dialog.hidden)closeDialog();});
- new MutationObserver(sync).observe(picker,{childList:true,subtree:true});
+ const baseSyncUserSelections=syncUserSelections;
+ syncUserSelections=function(){
+  baseSyncUserSelections();
+  if(rosterLoaded)renderPicker();
+  sync();
+ };
+ const waitForUser=setInterval(()=>{
+  if(!currentUser)return;
+  clearInterval(waitForUser);
+  loadRoster();
+ },200);
  sync();
 })();
 </script></body></html>
