@@ -817,10 +817,9 @@ class Handler(SimpleHTTPRequestHandler):
                     self.wfile.write(chunk)
                     remaining -= len(chunk)
             return
-        if path.startswith("/inspiration-assets/"):
-            # These are static thumbnails used by the browser after the page is
-            # rendered.  Keep them available so image loading is not coupled to
-            # the in-memory session lifecycle; directory browsing remains off.
+        if path.startswith(("/inspiration-assets/", "/ui-icons/")):
+            # These are static visual assets used by the browser after the page
+            # is rendered. Keep them available while directory browsing remains off.
             super().do_GET()
             return
         if path not in {"/", "/ai-starrail-design-console.html"}:
