@@ -768,10 +768,20 @@ const taskCompletionMonth=task=>{const history=[...(task?.history||[])].reverse(
 const taskSubmissionMonth=task=>taskDateMonth(task?.created_at||task?.submitted_at||task?.submit_date||task?.updated_at);
 function taskMatchesSelectedMonth(task){
  const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
- if(!taskIsCompleted(task)&&selected===taskCenterCurrentMonth)return true;
- return (taskIsCompleted(task)?taskCompletionMonth(task):taskSubmissionMonth(task))===selected;
+ const submitted=taskSubmissionMonth(task);
+ if(!submitted||selected<submitted||selected>taskCenterCurrentMonth)return false;
+ if(!taskIsCompleted(task))return true;
+ const completed=taskCompletionMonth(task);
+ return !completed?selected===submitted:selected<=completed;
 }
-function taskCenterFilteredTasks(){return (sharedTasks||[]).filter(taskMatchesSelectedMonth)}
+function taskAtSelectedMonth(task){
+ const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
+ if(selected===taskCenterCurrentMonth||taskIsCompleted(task)&&taskCompletionMonth(task)===selected)return task;
+ const history=task?.history||[],past=history.filter(event=>{const month=taskDateMonth(event?.at);return month&&month<=selected}),latest=past[past.length-1],future=history.find(event=>{const month=taskDateMonth(event?.at);return month&&month>selected});
+ const stage=latest?.to_stage||future?.from_stage||'部门负责人审批';
+ return {...task,stage,stage_label:stage,current_stage:stage,current_stage_label:stage,status:'in_progress'};
+}
+function taskCenterFilteredTasks(){return (sharedTasks||[]).filter(taskMatchesSelectedMonth).map(taskAtSelectedMonth)}
 function taskSummaryStatus(task){
  const stage=taskSummaryStage(task);
  if(stage==='验收完结'||stage==='已完成'||task?.status==='completed')return{label:'已完成',tone:'success',group:'completed'};
@@ -805,7 +815,7 @@ function personalTaskCard(task){
 function renderPersonalTaskSummary(view){
  const section=taskCenterSummarySections[view];
  if(!section)return;
- const records=(view==='owned'?ownedTaskRecords():submittedTaskRecords()).filter(taskMatchesSelectedMonth);
+ const records=(view==='owned'?ownedTaskRecords():submittedTaskRecords()).filter(taskMatchesSelectedMonth).map(taskAtSelectedMonth);
  const groups={pending:[],progress:[],review:[],completed:[]};
  records.forEach(task=>groups[taskSummaryStatus(task).group].push(task));
  const columns=[['pending','待处理'],['progress','执行中'],['review','审核 / 验收'],['completed','已完结']];
@@ -818,8 +828,9 @@ function applyTaskCenterMonthFilter(){
  const tasks=taskCenterFilteredTasks();
  if(typeof renderLiveDashboard==='function')renderLiveDashboard(tasks);
  if(typeof renderTypeDashboards==='function')renderTypeDashboards(tasks);
- const completed=tasks.filter(taskIsCompleted),sum=list=>list.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
- const selected=taskCenterMonthInput.value||taskCenterCurrentMonth,periodLabel=selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
+ const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
+ const completed=tasks.filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===selected),sum=list=>list.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
+ const periodLabel=selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
  const designOutput=sum(completed.filter(task=>task.type!=='视频'&&task.type!=='图片拍摄'));
  const videoOutput=sum(completed.filter(task=>task.type==='视频'));
  const shootOutput=sum(completed.filter(task=>task.type==='图片拍摄'));
