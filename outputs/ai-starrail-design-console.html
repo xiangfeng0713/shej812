@@ -1090,12 +1090,62 @@ setInterval(()=>{
  updateCompletedMonthlyOutput();
 })();
 </script>
+<style id="v2-dashboard-submenu-20260825">
+.nav button[data-page="dashboard"] .nav-expand{width:8px;height:8px;margin-left:auto;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .18s ease}
+.nav button[data-page="dashboard"][aria-expanded="true"] .nav-expand{transform:rotate(225deg) translate(-1px,-1px)}
+#dashboard.dashboard-view-overview>.dashboard-personal-panel{display:none!important}
+#dashboard.dashboard-view-personal>:not(.dashboard-head):not(.dashboard-personal-panel){display:none!important}
+#dashboard.dashboard-view-personal>.dashboard-personal-panel{display:block!important;margin-top:20px}
+</style>
 <script id="v2-dashboard-ai-overview-20260825">
 (()=>{
  const dashboard=document.getElementById('dashboard');
  if(!dashboard)return;
  const personalOutput=[...dashboard.children].find(section=>section.matches('section.dashboard-card')&&section.querySelector('h2')?.textContent.trim()==='个人月度产出');
  if(!personalOutput)return;
+ personalOutput.classList.add('dashboard-personal-panel');
+ const dashboardButton=document.querySelector('.nav button[data-page="dashboard"]');
+ const dashboardMenu=document.createElement('div');
+ dashboardMenu.className='task-center-submenu dashboard-submenu';
+ dashboardMenu.hidden=true;
+ dashboardMenu.innerHTML='<a href="#" data-dashboard-view="overview">AI月度综合产出</a><a href="#" data-dashboard-view="personal">个人月度产出</a>';
+ if(dashboardButton){
+  dashboardButton.setAttribute('aria-expanded','false');
+  dashboardButton.insertAdjacentHTML('beforeend','<i class="nav-expand" aria-hidden="true"></i>');
+  dashboardButton.insertAdjacentElement('afterend',dashboardMenu);
+ }
+ const showDashboardView=view=>{
+  const personal=view==='personal';
+  dashboard.classList.toggle('dashboard-view-personal',personal);
+  dashboard.classList.toggle('dashboard-view-overview',!personal);
+  dashboardMenu.querySelectorAll('[data-dashboard-view]').forEach(link=>link.classList.toggle('active',link.dataset.dashboardView===(personal?'personal':'overview')));
+  const description=dashboard.querySelector('.dashboard-head p');
+  if(description)description.textContent=personal?'查看团队成员个人月度任务产出与交付数据。':'任务产出、部门分布、AI 生图与视频应用数据概览。';
+ };
+ showDashboardView('overview');
+ dashboardButton?.addEventListener('click',()=>{
+  const open=dashboardMenu.hidden;
+  dashboardMenu.hidden=!open;
+  dashboardButton.setAttribute('aria-expanded',String(open));
+  if(!dashboard.classList.contains('dashboard-view-personal'))showDashboardView('overview');
+ });
+ dashboardMenu.querySelectorAll('[data-dashboard-view]').forEach(link=>link.addEventListener('click',event=>{
+  event.preventDefault();
+  document.querySelector('.nav button[data-page].active')?.classList.remove('active');
+  dashboardButton?.classList.add('active');
+  document.querySelector('.page.active')?.classList.remove('active');
+  dashboard.classList.add('active');
+  const taskRail=document.querySelector('.task-rail');
+  if(taskRail)taskRail.hidden=true;
+  document.querySelector('.app')?.classList.add('task-center-hidden');
+  const title=document.getElementById('title');
+  if(title)title.textContent='数据看板';
+  dashboardMenu.hidden=false;
+  dashboardButton?.setAttribute('aria-expanded','true');
+  if(typeof refreshDashboardFromTasks==='function')refreshDashboardFromTasks();
+  showDashboardView(link.dataset.dashboardView);
+  window.scrollTo({top:0,behavior:'smooth'});
+ }));
  const overview=document.createElement('div');
  overview.className='dashboard-ai-grid';
  overview.innerHTML=`
