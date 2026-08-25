@@ -629,14 +629,18 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-period{border-color:#DBDCE0!important;background:#fff!important;color:#585858!important;font-size:13px!important}
 #dashboard .dashboard-period span,#dashboard .dashboard-period select{font-size:13px!important;line-height:20px!important;font-weight:400!important}
 #dashboard .dashboard-period select{color:#262626!important;background:#fff!important}
-#dashboard .metric-card,#dashboard .dashboard-card{border-color:#DBDCE0!important;background:#fff!important}
-#dashboard .metric-card>span{display:block!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#585858!important;font-size:14px!important;line-height:21px!important;font-weight:400!important;box-shadow:none!important}
-#dashboard .metric-card>b{font-size:22px!important;line-height:33px!important;font-weight:600!important}
-#dashboard .metric-card>small{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
-#dashboard .metric-demand>b,#dashboard .metric-progress>b{color:#2962FF!important}
-#dashboard .todo-metric>b{color:#FE585B!important}
-#dashboard .metric-delivered>b{color:#35B188!important}
-#dashboard .overdue-metric>b{color:#F29849!important}
+#dashboard .dashboard-card{border-color:#DBDCE0!important;background:#fff!important}
+#dashboard .metric-card{display:flex!important;min-height:156px;flex-direction:column;align-items:center;justify-content:center;padding:18px 14px!important;border:0!important;border-radius:10px!important;text-align:center;box-shadow:0 5px 14px rgba(38,38,38,.08);transition:transform .2s ease,box-shadow .2s ease,filter .2s ease}
+#dashboard .metric-card>span{display:block!important;min-width:0!important;height:auto!important;margin:4px 0 0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#fff!important;font-size:16px!important;line-height:24px!important;font-weight:600!important;box-shadow:none!important}
+#dashboard .metric-card>b{order:-1;color:#fff!important;font-size:46px!important;line-height:52px!important;font-weight:700!important;letter-spacing:-1px}
+#dashboard .metric-card>small{color:rgba(255,255,255,.9)!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .metric-demand{background:linear-gradient(125deg,#2962FF 0%,#75B6FF 100%)!important}
+#dashboard .todo-metric{background:linear-gradient(125deg,#FE585B 0%,#FF8173 100%)!important}
+#dashboard .metric-progress{background:linear-gradient(125deg,#7B47DF 0%,#9B79ED 100%)!important}
+#dashboard .metric-delivered{background:linear-gradient(125deg,#35B188 0%,#61C8A3 100%)!important}
+#dashboard .overdue-metric{background:linear-gradient(125deg,#F29849 0%,#F6B66C 100%)!important}
+#dashboard .metric-card:hover{transform:translateY(-3px);box-shadow:0 10px 22px rgba(38,38,38,.15);filter:brightness(1.035)}
+@media(prefers-reduced-motion:reduce){#dashboard .metric-card{transition:none}#dashboard .metric-card:hover{transform:none}}
 #dashboard .todo-ring{background:conic-gradient(#FE585B 0 var(--dashboard-ring-stop,22%),#EAEDF2 var(--dashboard-ring-stop,22%) 100%)!important}
 #dashboard .done-ring{background:conic-gradient(#35B188 0 var(--dashboard-ring-stop,71%),#EAEDF2 var(--dashboard-ring-stop,71%) 100%)!important}
 #dashboard .risk-ring{background:conic-gradient(#F29849 0 var(--dashboard-ring-stop,13%),#EAEDF2 var(--dashboard-ring-stop,13%) 100%)!important}
