@@ -938,6 +938,27 @@ setInterval(()=>{
  };
 })();
 </script>
+<script id="v2-completed-month-output-20260825">
+(()=>{
+ const updateCompletedMonthlyOutput=()=>{
+  const inTaskCenter=document.getElementById('taskboard')?.classList.contains('active')&&!taskCenterMonthControl.hidden;
+  const selected=inTaskCenter?(taskCenterMonthInput.value||taskCenterCurrentMonth):taskCenterCurrentMonth;
+  const completed=(sharedTasks||[]).filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===selected);
+  const sum=tasks=>tasks.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
+  const period=selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
+  const design=document.getElementById('dashboardTaskTotal');
+  const video=document.getElementById('typePeriod');
+  if(design)design.textContent=`${period}产出 ${sum(completed.filter(task=>task.type!=='视频'&&task.type!=='图片拍摄'))} 张`;
+  if(video)video.textContent=`${period}产出 ${sum(completed.filter(task=>task.type==='视频'))} 条 / ${sum(completed.filter(task=>task.type==='图片拍摄'))} 次`;
+ };
+ const refresh=refreshDashboardFromTasks;
+ refreshDashboardFromTasks=async function(...args){
+  try{return await refresh.apply(this,args)}finally{updateCompletedMonthlyOutput()}
+ };
+ taskCenterMonthInput.addEventListener('change',updateCompletedMonthlyOutput);
+ updateCompletedMonthlyOutput();
+})();
+</script>
 <script id="v2-global-status-tags-20260824">
 (()=>{
  const statusTones=new Map([
