@@ -580,7 +580,7 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 /* 数据看板仅展示统计数据；任务执行汇总统一归属任务中心 */
 #dashboard .dashboard-main{display:none!important}
 #dashboard .dashboard-layout{display:block!important}
-#dashboard .dashboard-side{position:static!important;top:auto!important;height:auto!important;min-height:0!important;max-height:none!important;padding:0!important;overflow:visible!important;align-self:auto!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:20px;background:transparent!important}
+#dashboard .dashboard-side{position:static!important;top:auto!important;height:auto!important;min-height:0!important;max-height:none!important;padding:0!important;overflow:visible!important;align-self:auto!important;display:grid!important;grid-template-columns:minmax(0,1fr);align-items:stretch;gap:20px;background:transparent!important}
 #dashboard .dashboard-side>.dashboard-card{width:100%;min-width:0;margin:0!important;grid-area:auto!important}
 #dashboard>.dashboard-card{margin-top:20px}
 #dashboard .dash-ring small{display:block!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#585858!important;font-size:13px!important;line-height:18px!important;font-weight:400!important;box-shadow:none!important}
@@ -614,9 +614,9 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .todo-metric>b{color:#FE585B!important}
 #dashboard .metric-delivered>b{color:#35B188!important}
 #dashboard .overdue-metric>b{color:#F29849!important}
-#dashboard .todo-ring{background:conic-gradient(#FE585B 0 22%,#EAEDF2 22% 100%)!important}
-#dashboard .done-ring{background:conic-gradient(#35B188 0 71%,#EAEDF2 71% 100%)!important}
-#dashboard .risk-ring{background:conic-gradient(#F29849 0 13%,#EAEDF2 13% 100%)!important}
+#dashboard .todo-ring{background:conic-gradient(#FE585B 0 var(--dashboard-ring-stop,22%),#EAEDF2 var(--dashboard-ring-stop,22%) 100%)!important}
+#dashboard .done-ring{background:conic-gradient(#35B188 0 var(--dashboard-ring-stop,71%),#EAEDF2 var(--dashboard-ring-stop,71%) 100%)!important}
+#dashboard .risk-ring{background:conic-gradient(#F29849 0 var(--dashboard-ring-stop,13%),#EAEDF2 var(--dashboard-ring-stop,13%) 100%)!important}
 #dashboard .dash-ring:before{background:#fff!important}
 #dashboard .dash-ring>b{color:#262626!important;font-size:18px!important;line-height:25px!important;font-weight:600!important}
 #dashboard .ring-item>span,#dashboard .bar-list>div>span,#dashboard .bar-list>div>b{font-size:13px!important;line-height:20px!important;font-weight:400!important}
@@ -628,6 +628,27 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .bar-list>div:nth-child(3)>i>em{background:#F60000!important}
 #dashboard .bar-list>div:nth-child(4)>i>em{background:#7B47DF!important}
 #dashboard .bar-list>div:nth-child(5)>i>em{background:#75B6FF!important}
+#dashboard>.dashboard-department-tree{margin:20px 0 0!important}
+#dashboard .dashboard-department-tree .section-title{margin-bottom:18px}
+#dashboard .department-tree-root{position:relative;width:min(250px,100%);margin:0 auto 28px;padding:12px 18px;border:1px solid #DBDCE0;border-radius:8px;background:#F8F9FD;text-align:center}
+#dashboard .department-tree-root:after{position:absolute;bottom:-28px;left:50%;width:1px;height:28px;background:#DBDCE0;content:""}
+#dashboard .department-tree-root span{display:block;color:#585858;font-size:13px;line-height:20px}
+#dashboard .department-tree-root b{display:block;margin-top:4px;color:#2962FF;font-size:22px;line-height:33px;font-weight:600}
+#dashboard .dashboard-department-tree .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;padding-top:24px}
+#dashboard .dashboard-department-tree .bar-list:before{position:absolute;top:0;right:10%;left:10%;height:1px;background:#DBDCE0;content:""}
+#dashboard .dashboard-department-tree .bar-list>div{position:relative;display:grid!important;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 8px auto;align-items:center;gap:9px 10px;min-width:0;min-height:105px;padding:13px 14px;border:1px solid #E7E8EA;border-top-width:2px;border-radius:8px;background:#F8F9FD}
+#dashboard .dashboard-department-tree .bar-list>div:before{position:absolute;top:-25px;left:50%;width:1px;height:24px;background:#DBDCE0;content:""}
+#dashboard .dashboard-department-tree .bar-list>div>span{grid-column:1;grid-row:1;overflow:hidden;color:#262626!important;font-size:14px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
+#dashboard .dashboard-department-tree .bar-list>div>b{grid-column:2;grid-row:1;color:#262626!important;font-size:16px!important;font-weight:600!important}
+#dashboard .dashboard-department-tree .bar-list>div>i{grid-column:1/-1;grid-row:2;width:100%;height:8px}
+#dashboard .dashboard-department-tree .bar-list>div>.department-tree-share{grid-column:1/-1;grid-row:3;color:#585858;font-size:13px;line-height:20px}
+#dashboard .dashboard-department-tree .bar-list>div:nth-child(1){border-top-color:#FF8707}
+#dashboard .dashboard-department-tree .bar-list>div:nth-child(2){border-top-color:#00B309}
+#dashboard .dashboard-department-tree .bar-list>div:nth-child(3){border-top-color:#F60000}
+#dashboard .dashboard-department-tree .bar-list>div:nth-child(4){border-top-color:#7B47DF}
+#dashboard .dashboard-department-tree .bar-list>div:nth-child(5){border-top-color:#75B6FF}
+@media(max-width:1100px){#dashboard .dashboard-department-tree .bar-list{grid-template-columns:repeat(3,minmax(0,1fr))}#dashboard .department-tree-root:after,#dashboard .dashboard-department-tree .bar-list:before,#dashboard .dashboard-department-tree .bar-list>div:before{display:none}}
+@media(max-width:680px){#dashboard .dashboard-department-tree .bar-list{grid-template-columns:minmax(0,1fr)}}
 #dashboard .dashboard-ai-source{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
 #dashboard .dashboard-ai-metric{border-color:#E7E8EA!important;background:#F8F9FD!important}
 #dashboard .dashboard-ai-metric>span{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
@@ -1085,6 +1106,24 @@ setInterval(()=>{
    </div>
   </section>`;
  dashboard.insertBefore(overview,personalOutput);
+ const departmentCard=[...dashboard.querySelectorAll('.dashboard-side>.dashboard-card')].find(section=>section.querySelector('h2')?.textContent.trim()==='部门需求分布');
+ if(departmentCard){
+  departmentCard.classList.add('dashboard-department-tree');
+  const intro=departmentCard.querySelector('.section-title p');
+  if(intro)intro.textContent='按真实任务数量汇总五个部门，展示本月产量与占比。';
+  const branchList=departmentCard.querySelector('.bar-list');
+  const root=document.createElement('div');
+  root.className='department-tree-root';
+  root.innerHTML='<span>本月部门需求总量</span><b id="dashboardDepartmentTreeTotal">0</b>';
+  departmentCard.insertBefore(root,branchList);
+  branchList?.querySelectorAll(':scope>div').forEach(row=>{
+   const share=document.createElement('small');
+   share.className='department-tree-share';
+   share.textContent='占比 0%';
+   row.appendChild(share);
+  });
+  dashboard.insertBefore(departmentCard,overview);
+ }
  const introduction=dashboard.querySelector('.dashboard-head p');
  if(introduction)introduction.textContent='任务产出、部门分布、AI 生图与视频应用数据概览。';
  const metricNumber=value=>{
@@ -1102,9 +1141,48 @@ setInterval(()=>{
    return !taskIsCompleted(task)||taskCompletionMonth(task)===currentMonth;
   });
   const completed=monthlyTasks.filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===currentMonth);
+  const waiting=monthlyTasks.filter(task=>!taskIsCompleted(task));
   const total=monthlyTasks.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
   const completedTotal=completed.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  const waitingTotal=waiting.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  const inProgress=monthlyTasks.filter(task=>['设计需求分配','需求校对','需求校队','需求交付','初稿审核'].includes(task.stage));
+  const delivered=monthlyTasks.filter(task=>taskIsCompleted(task)||task.stage==='需求方验收 / 评分');
+  const overdue=waiting.filter(task=>{
+   const date=String(task.delivery_date||task.expected_delivery_date||task.due_date||'').trim();
+   if(!date)return false;
+   const raw=String(task.delivery_time||task.expected_delivery_time||'23:59').slice(0,5);
+   const time=/^\d{2}:\d{2}$/.test(raw)?raw:'23:59';
+   const deadline=new Date(`${date.slice(0,10)}T${time}:00`);
+   return Number.isFinite(deadline.getTime())&&deadline.getTime()<Date.now();
+  });
+  const overdueTotal=overdue.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
   const videos=completed.filter(task=>task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  put('dashTotal',formatCount(total));
+  put('dashTodo',formatCount(waitingTotal));
+  put('dashProgress',formatCount(inProgress.reduce((sum,task)=>sum+(Number(task.quantity)||0),0)));
+  put('dashDelivered',formatCount(delivered.reduce((sum,task)=>sum+(Number(task.quantity)||0),0)));
+  put('dashOverdue',formatCount(overdueTotal));
+  const overdueCaption=dashboard.querySelector('.overdue-metric>small');
+  if(overdueCaption)overdueCaption.textContent=overdue.length?`${overdue.length} 项任务需优先处理`:'暂无逾期任务';
+  [['.todo-ring',waitingTotal],['.done-ring',completedTotal],['.risk-ring',overdueTotal]].forEach(([selector,value])=>{
+   const ring=dashboard.querySelector(selector);
+   if(!ring)return;
+   const number=ring.querySelector('b');
+   if(number)number.textContent=formatCount(value);
+   ring.style.setProperty('--dashboard-ring-stop',`${Math.min(100,total?value/total*100:0)}%`);
+  });
+  const departments=['国内电商','海外电商','产品市场','线下物料','软件私域'];
+  const amounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department).reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
+  const departmentTotal=amounts.reduce((sum,value)=>sum+value,0);
+  const maximum=Math.max(...amounts,1);
+  put('dashboardDepartmentTreeTotal',`${formatCount(departmentTotal)} 张 / 条`);
+  dashboard.querySelectorAll('.dashboard-department-tree .bar-list>div').forEach((row,index)=>{
+   const value=amounts[index]||0;
+   const number=row.querySelector('b'),bar=row.querySelector('em'),share=row.querySelector('.department-tree-share');
+   if(number)number.textContent=formatCount(value);
+   if(bar)bar.style.width=`${value/maximum*100}%`;
+   if(share)share.textContent=`占比 ${formatRate(value,departmentTotal)}`;
+  });
   put('dashboardVideoDelivered',`${formatCount(videos)} 条`);
   const completionLabel=dashboard.querySelector('.done-ring')?.parentElement?.querySelector(':scope > span');
   if(completionLabel)completionLabel.textContent=`完成率 ${formatRate(completedTotal,total)}`;
