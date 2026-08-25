@@ -576,6 +576,13 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 .task-center-period{display:flex;align-items:center;gap:10px;margin-left:auto;color:#585858;font-size:13px;line-height:20px;font-weight:400}
 .task-center-period input{width:148px;height:32px;padding:5px 10px;border:1px solid #DBDCE0;border-radius:6px;background:#fff;color:#262626;font-size:13px;line-height:20px;outline:0}
 .task-center-period input:hover{border-color:#75B6FF}.task-center-period input:focus{border-color:#2962FF;box-shadow:0 0 0 3px #2962FF12}
+/* 数据看板仅展示统计数据；任务执行汇总统一归属任务中心 */
+#dashboard .dashboard-main{display:none!important}
+#dashboard .dashboard-layout{display:block!important}
+#dashboard .dashboard-side{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:20px}
+#dashboard .dashboard-side>.dashboard-card{width:100%;min-width:0;margin:0!important;grid-area:auto!important}
+#dashboard>.dashboard-card{margin-top:20px}
+@media(max-width:900px){#dashboard .dashboard-side{grid-template-columns:minmax(0,1fr)}}
 /* 部门任务汇总：置顶加急面板统一规范字号、中性色与按钮样式 */
 #taskCenterSummaryHost #pinBox{margin-top:16px;padding:16px;border:1px solid #DBDCE0;border-radius:8px;background:#fff;color:#262626}
 #taskCenterSummaryHost #pinBox>b{display:block;color:#262626;font-size:16px;line-height:24px;font-weight:600}
