@@ -628,27 +628,19 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .bar-list>div:nth-child(3)>i>em{background:#F60000!important}
 #dashboard .bar-list>div:nth-child(4)>i>em{background:#7B47DF!important}
 #dashboard .bar-list>div:nth-child(5)>i>em{background:#75B6FF!important}
-#dashboard>.dashboard-department-tree{margin:20px 0 0!important}
-#dashboard .dashboard-department-tree .section-title{margin-bottom:18px}
-#dashboard .department-tree-root{position:relative;width:min(250px,100%);margin:0 auto 28px;padding:12px 18px;border:1px solid #DBDCE0;border-radius:8px;background:#F8F9FD;text-align:center}
-#dashboard .department-tree-root:after{position:absolute;bottom:-28px;left:50%;width:1px;height:28px;background:#DBDCE0;content:""}
-#dashboard .department-tree-root span{display:block;color:#585858;font-size:13px;line-height:20px}
-#dashboard .department-tree-root b{display:block;margin-top:4px;color:#2962FF;font-size:22px;line-height:33px;font-weight:600}
-#dashboard .dashboard-department-tree .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;padding-top:24px}
-#dashboard .dashboard-department-tree .bar-list:before{position:absolute;top:0;right:10%;left:10%;height:1px;background:#DBDCE0;content:""}
-#dashboard .dashboard-department-tree .bar-list>div{position:relative;display:grid!important;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 8px auto;align-items:center;gap:9px 10px;min-width:0;min-height:105px;padding:13px 14px;border:1px solid #E7E8EA;border-top-width:2px;border-radius:8px;background:#F8F9FD}
-#dashboard .dashboard-department-tree .bar-list>div:before{position:absolute;top:-25px;left:50%;width:1px;height:24px;background:#DBDCE0;content:""}
-#dashboard .dashboard-department-tree .bar-list>div>span{grid-column:1;grid-row:1;overflow:hidden;color:#262626!important;font-size:14px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
-#dashboard .dashboard-department-tree .bar-list>div>b{grid-column:2;grid-row:1;color:#262626!important;font-size:16px!important;font-weight:600!important}
-#dashboard .dashboard-department-tree .bar-list>div>i{grid-column:1/-1;grid-row:2;width:100%;height:8px}
-#dashboard .dashboard-department-tree .bar-list>div>.department-tree-share{grid-column:1/-1;grid-row:3;color:#585858;font-size:13px;line-height:20px}
-#dashboard .dashboard-department-tree .bar-list>div:nth-child(1){border-top-color:#FF8707}
-#dashboard .dashboard-department-tree .bar-list>div:nth-child(2){border-top-color:#00B309}
-#dashboard .dashboard-department-tree .bar-list>div:nth-child(3){border-top-color:#F60000}
-#dashboard .dashboard-department-tree .bar-list>div:nth-child(4){border-top-color:#7B47DF}
-#dashboard .dashboard-department-tree .bar-list>div:nth-child(5){border-top-color:#75B6FF}
-@media(max-width:1100px){#dashboard .dashboard-department-tree .bar-list{grid-template-columns:repeat(3,minmax(0,1fr))}#dashboard .department-tree-root:after,#dashboard .dashboard-department-tree .bar-list:before,#dashboard .dashboard-department-tree .bar-list>div:before{display:none}}
-@media(max-width:680px){#dashboard .dashboard-department-tree .bar-list{grid-template-columns:minmax(0,1fr)}}
+#dashboard>.dashboard-department-chart{margin:20px 0 0!important}
+#dashboard .dashboard-department-chart .section-title{align-items:flex-start;margin-bottom:12px}
+#dashboard .department-chart-total{display:flex;align-items:center;gap:8px;color:#585858;font-size:13px;line-height:24px;white-space:nowrap}
+#dashboard .department-chart-total b{color:#2962FF;font-size:16px;line-height:24px;font-weight:600}
+#dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:10px 24px 0}
+#dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:54px;left:24px;height:1px;background:#DBDCE0;content:""}
+#dashboard .dashboard-department-chart .bar-list>div{position:relative;z-index:1;display:flex!important;min-width:0;min-height:286px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0;border:0;background:transparent}
+#dashboard .dashboard-department-chart .bar-list>div>i{order:0;display:flex!important;width:clamp(44px,42%,76px);height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important}
+#dashboard .dashboard-department-chart .bar-list>div>i>b{display:block;margin-bottom:8px;color:#262626;font-size:16px;line-height:22px;font-weight:600}
+#dashboard .dashboard-department-chart .bar-list>div>i>em{display:block;width:100%!important;height:0;border-radius:4px 4px 0 0;transition:height .25s ease}
+#dashboard .dashboard-department-chart .bar-list>div>span{order:1;overflow:hidden;max-width:100%;color:#262626!important;font-size:14px!important;line-height:20px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
+#dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;color:#585858;font-size:13px;line-height:20px}
+@media(max-width:760px){#dashboard .dashboard-department-chart .bar-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}#dashboard .dashboard-department-chart .bar-list:after{display:none}}
 #dashboard .dashboard-ai-source{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
 #dashboard .dashboard-ai-metric{border-color:#E7E8EA!important;background:#F8F9FD!important}
 #dashboard .dashboard-ai-metric>span{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
@@ -1108,17 +1100,19 @@ setInterval(()=>{
  dashboard.insertBefore(overview,personalOutput);
  const departmentCard=[...dashboard.querySelectorAll('.dashboard-side>.dashboard-card')].find(section=>section.querySelector('h2')?.textContent.trim()==='部门需求分布');
  if(departmentCard){
-  departmentCard.classList.add('dashboard-department-tree');
+  departmentCard.classList.add('dashboard-department-chart');
   const intro=departmentCard.querySelector('.section-title p');
   if(intro)intro.textContent='按真实任务数量汇总五个部门，展示本月产量与占比。';
-  const branchList=departmentCard.querySelector('.bar-list');
-  const root=document.createElement('div');
-  root.className='department-tree-root';
-  root.innerHTML='<span>本月部门需求总量</span><b id="dashboardDepartmentTreeTotal">0</b>';
-  departmentCard.insertBefore(root,branchList);
-  branchList?.querySelectorAll(':scope>div').forEach(row=>{
+  const departmentList=departmentCard.querySelector('.bar-list');
+  const total=document.createElement('div');
+  total.className='department-chart-total';
+  total.innerHTML='<span>本月总量</span><b id="dashboardDepartmentTotal">0</b>';
+  departmentCard.querySelector('.section-title')?.appendChild(total);
+  departmentList?.querySelectorAll(':scope>div').forEach(row=>{
+   const amount=row.querySelector('b'),column=row.querySelector('i');
+   if(amount&&column)column.prepend(amount);
    const share=document.createElement('small');
-   share.className='department-tree-share';
+   share.className='department-chart-share';
    share.textContent='占比 0%';
    row.appendChild(share);
   });
@@ -1175,12 +1169,12 @@ setInterval(()=>{
   const amounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department).reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
   const departmentTotal=amounts.reduce((sum,value)=>sum+value,0);
   const maximum=Math.max(...amounts,1);
-  put('dashboardDepartmentTreeTotal',`${formatCount(departmentTotal)} 张 / 条`);
-  dashboard.querySelectorAll('.dashboard-department-tree .bar-list>div').forEach((row,index)=>{
+  put('dashboardDepartmentTotal',`${formatCount(departmentTotal)} 张 / 条`);
+  dashboard.querySelectorAll('.dashboard-department-chart .bar-list>div').forEach((row,index)=>{
    const value=amounts[index]||0;
-   const number=row.querySelector('b'),bar=row.querySelector('em'),share=row.querySelector('.department-tree-share');
+   const number=row.querySelector('b'),bar=row.querySelector('em'),share=row.querySelector('.department-chart-share');
    if(number)number.textContent=formatCount(value);
-   if(bar)bar.style.width=`${value/maximum*100}%`;
+   if(bar){bar.style.width='100%';bar.style.height=value?`${Math.max(value/maximum*86,3.5)}%`:'0'}
    if(share)share.textContent=`占比 ${formatRate(value,departmentTotal)}`;
   });
   put('dashboardVideoDelivered',`${formatCount(videos)} 条`);
