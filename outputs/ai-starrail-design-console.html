@@ -1093,7 +1093,9 @@ setInterval(()=>{
 <style id="v2-dashboard-submenu-20260825">
 .nav button[data-page="dashboard"] .nav-expand{width:8px;height:8px;margin-left:auto;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .18s ease}
 .nav button[data-page="dashboard"][aria-expanded="true"] .nav-expand{transform:rotate(225deg) translate(-1px,-1px)}
-#dashboard.dashboard-view-overview>.dashboard-personal-panel{display:none!important}
+#dashboard.dashboard-view-overview>.dashboard-personal-panel,#dashboard.dashboard-view-overview>.dashboard-ai-grid{display:none!important}
+#dashboard.dashboard-view-ai>:not(.dashboard-head):not(.dashboard-ai-grid){display:none!important}
+#dashboard.dashboard-view-ai>.dashboard-ai-grid{display:grid!important;margin-top:20px}
 #dashboard.dashboard-view-personal>:not(.dashboard-head):not(.dashboard-personal-panel){display:none!important}
 #dashboard.dashboard-view-personal>.dashboard-personal-panel{display:block!important;margin-top:20px}
 </style>
@@ -1108,7 +1110,7 @@ setInterval(()=>{
  const dashboardMenu=document.createElement('div');
  dashboardMenu.className='task-center-submenu dashboard-submenu';
  dashboardMenu.hidden=true;
- dashboardMenu.innerHTML='<a href="#" data-dashboard-view="overview">AI月度综合产出</a><a href="#" data-dashboard-view="personal">个人月度产出</a>';
+ dashboardMenu.innerHTML='<a href="#" data-dashboard-view="ai">AI月度产出</a><a href="#" data-dashboard-view="personal">个人月度产出</a>';
  if(dashboardButton){
   dashboardButton.setAttribute('aria-expanded','false');
   dashboardButton.insertAdjacentHTML('beforeend','<i class="nav-expand" aria-hidden="true"></i>');
@@ -1116,18 +1118,20 @@ setInterval(()=>{
  }
  const showDashboardView=view=>{
   const personal=view==='personal';
+  const ai=view==='ai';
   dashboard.classList.toggle('dashboard-view-personal',personal);
-  dashboard.classList.toggle('dashboard-view-overview',!personal);
-  dashboardMenu.querySelectorAll('[data-dashboard-view]').forEach(link=>link.classList.toggle('active',link.dataset.dashboardView===(personal?'personal':'overview')));
+  dashboard.classList.toggle('dashboard-view-ai',ai);
+  dashboard.classList.toggle('dashboard-view-overview',!personal&&!ai);
+  dashboardMenu.querySelectorAll('[data-dashboard-view]').forEach(link=>link.classList.toggle('active',link.dataset.dashboardView===view));
   const description=dashboard.querySelector('.dashboard-head p');
-  if(description)description.textContent=personal?'查看团队成员个人月度任务产出与交付数据。':'任务产出、部门分布、AI 生图与视频应用数据概览。';
+  if(description)description.textContent=personal?'查看团队成员个人月度任务产出与交付数据。':ai?'按月份查看 AI 生图与 AI 视频产出数据。':'任务产出、处理状态与部门需求分布数据概览。';
  };
  showDashboardView('overview');
  dashboardButton?.addEventListener('click',()=>{
   const open=dashboardMenu.hidden;
   dashboardMenu.hidden=!open;
   dashboardButton.setAttribute('aria-expanded',String(open));
-  if(!dashboard.classList.contains('dashboard-view-personal'))showDashboardView('overview');
+  showDashboardView('overview');
  });
  dashboardMenu.querySelectorAll('[data-dashboard-view]').forEach(link=>link.addEventListener('click',event=>{
   event.preventDefault();
@@ -1203,7 +1207,7 @@ setInterval(()=>{
   dashboard.insertBefore(departmentCard,overview);
  }
  const introduction=dashboard.querySelector('.dashboard-head p');
- if(introduction)introduction.textContent='任务产出、部门分布、AI 生图与视频应用数据概览。';
+ if(introduction)introduction.textContent='任务产出、处理状态与部门需求分布数据概览。';
  const dashboardMonthInput=document.getElementById('dashboardMonth');
  const dashboardMonthStorageKey='ai-visual-dashboard-month';
  let dashboardMonthPickerOpen=false;
