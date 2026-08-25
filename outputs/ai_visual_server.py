@@ -386,6 +386,76 @@ def download_dashboard_ai_workbook(source_url: str) -> bytes:
     return content
 
 
+def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, dict[str, dict[str, str]]]:
+    """Map authorized AirScript records into the existing monthly AI metrics."""
+    result: dict[str, dict[str, dict[str, str]]] = {}
+
+    def normalized(value: str) -> str:
+        return re.sub(r"[\s_\-/（）()：:]+", "", str(value or "")).casefold()
+
+    for record in records[:5000]:
+        if not isinstance(record, dict):
+            continue
+        fields = {normalized(key): value for key, value in record.items() if value not in (None, "")}
+        raw_month = next((str(value) for key, value in fields.items() if "月份" in key or key in ("日期", "时间", "month")), "")
+        match = re.search(r"(20\d{2})\s*[年/.\-]\s*(\d{1,2})", raw_month)
+        month = f"{match.group(1)}-{int(match.group(2)):02d}" if match and 1 <= int(match.group(2)) <= 12 else fallback_month
+        row_hint = normalized(str(record.get("__sheet", "")) + " " + str(next((value for key, value in fields.items() if key in ("类型", "分类", "类别", "板块", "type")), "")))
+        for kind, hints in (("image", ("图片", "生图", "图像", "image")), ("video", ("视频", "video"))):
+            section: dict[str, str] = {}
+            for key, value in fields.items():
+                field_kind = "video" if any(hint in key for hint in ("视频", "video")) else "image" if any(hint in key for hint in ("图片", "生图", "图像", "image")) else ""
+                if field_kind and field_kind != kind or not field_kind and not any(hint in row_hint for hint in hints):
+                    continue
+                if "采纳率" in key or "采用率" in key:
+                    continue
+                if any(word in key for word in ("生成", "产出", "generated")):
+                    section["generated"] = clean_metric_number(str(value))
+                elif any(word in key for word in ("采纳", "采用", "adopted")):
+                    section["adopted"] = clean_metric_number(str(value))
+                elif any(word in key for word in ("复用", "提示词", "素材", "reusable")):
+                    section["reusable"] = str(value).strip()[:2000]
+            if section:
+                result.setdefault(month, {}).setdefault(kind, {}).update(section)
+    if not result:
+        raise ValueError("金山文档授权成功，但未识别到月份、AI 生成图片/视频、实际采纳或可复用素材字段。")
+    return result
+
+
+def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str, dict[str, dict[str, str]]]:
+    """Read WPS multidimensional data using the official AirScript webhook."""
+    parsed = urlparse(webhook)
+    hostname = (parsed.hostname or "").casefold()
+    if parsed.scheme != "https" or not (hostname == "kdocs.cn" or hostname.endswith(".kdocs.cn")) or not re.fullmatch(r"/api/v3/ide/file/[^/]+/script/[^/]+/sync_task", parsed.path):
+        raise ValueError("请填写金山文档脚本菜单中复制的官方 Webhook 链接。")
+    if not token or len(token) > 512 or "\n" in token or "\r" in token:
+        raise ValueError("请填写有效的金山文档 AirScript 脚本令牌。")
+
+    class NoRedirectHandler(HTTPRedirectHandler):
+        def redirect_request(self, request, response, code, message, headers, new_url):
+            return None
+
+    payload = json.dumps({"Context": {"argv": {"month": month}}}, ensure_ascii=False).encode("utf-8")
+    request = Request(webhook, data=payload, headers={"AirScript-Token": token, "Content-Type": "application/json", "Accept": "application/json"}, method="POST")
+    try:
+        with build_opener(NoRedirectHandler()).open(request, timeout=20) as response:
+            raw = response.read(MAX_REVIEW_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_REVIEW_UPLOAD_BYTES:
+            raise ValueError("金山文档返回数据过大，请减少脚本读取范围。")
+        document = json.loads(raw.decode("utf-8"))
+    except HTTPError as error:
+        raise ValueError("金山文档授权失败，请检查脚本令牌、Webhook 链接及文档访问权限。") from error
+    except (URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("暂时无法连接金山文档，请检查网络和脚本返回数据。") from error
+    if document.get("error") or document.get("status") not in (None, "finished", "success"):
+        raise ValueError("金山文档脚本执行失败，请检查读取脚本是否已正确保存。")
+    value = document.get("data", {}).get("result", document.get("result", []))
+    records = value.get("records", []) if isinstance(value, dict) else value
+    if not isinstance(records, list):
+        raise ValueError("金山文档脚本未返回记录，请复制并使用中台提供的读取脚本。")
+    return parse_dashboard_ai_records(records, month)
+
+
 def parse_review_action_sheet(cells: dict[str, str]) -> dict:
     summary = cells.get("A9", "").strip()[:4000]
     actions = []
@@ -1038,19 +1108,26 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             try:
                 source_url = fields.get("link", "").strip()
-                if source_url:
+                webhook = fields.get("webhook", "").strip()
+                script_token = fields.get("script_token", "").strip()
+                if webhook:
+                    imported = fetch_dashboard_airs_data(webhook, script_token, month)
+                elif source_url:
                     content = download_dashboard_ai_workbook(source_url)
+                    imported = parse_dashboard_ai_workbook(content, month)
                 elif uploaded:
                     filename, content = uploaded
                     if Path(filename).suffix.lower() != ".xlsx" or len(filename) > 120 or not content.startswith(b"PK"):
                         raise ValueError("仅支持有效的 XLSX 多维数据表格。")
+                    imported = parse_dashboard_ai_workbook(content, month)
                 else:
                     raise ValueError("请选择 AI 产出 XLSX 表格，或填写公开可访问的表格链接。")
-                imported = parse_dashboard_ai_workbook(content, month)
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             settings = data.setdefault("review_settings", {})
+            if webhook:
+                settings["ai_connector"] = {"webhook": webhook, "token": script_token, "updated_at": now()}
             stored = settings.setdefault("ai_data", {})
             for imported_month, sections in imported.items():
                 for kind, values in sections.items():

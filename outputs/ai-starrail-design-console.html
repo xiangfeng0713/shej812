@@ -595,6 +595,8 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-ai-import-button.secondary-import:hover{border-color:#75B6FF;background:#F8F9FD}
 #dashboard .dashboard-ai-link-form{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin-top:-8px}
 #dashboard .dashboard-ai-link-form[hidden]{display:none}
+#dashboard .dashboard-ai-auth-form{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(200px,.7fr) auto auto auto;align-items:center;gap:10px;margin-top:-8px}
+#dashboard .dashboard-ai-auth-form[hidden]{display:none}
 #dashboard .dashboard-ai-link-input{height:34px;min-width:0;flex:1;padding:0 12px;border:1px solid #DBDCE0;border-radius:5px;background:#fff;color:#262626;font-size:13px}
 #dashboard .dashboard-ai-link-input:focus{border-color:#2962FF;outline:none}
 #dashboard .dashboard-ai-card{min-width:0;margin:0!important}
@@ -1097,8 +1099,9 @@ setInterval(()=>{
  const overview=document.createElement('div');
  overview.className='dashboard-ai-grid';
  overview.innerHTML=`
-  <div class="dashboard-ai-import"><span class="dashboard-ai-import-note" id="dashboardAiImportMessage">支持上传表格文件，或通过表格链接同步各月份 AI 产出数据。</span><div class="dashboard-ai-import-actions"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkButton" type="button">导入表格链接</button><button class="dashboard-ai-import-button" id="dashboardAiImportButton" type="button">上传表格文件</button></div><input id="dashboardAiImportFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
+  <div class="dashboard-ai-import"><span class="dashboard-ai-import-note" id="dashboardAiImportMessage">支持金山文档官方授权、公开表格链接或 XLSX 文件导入。</span><div class="dashboard-ai-import-actions"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiAuthButton" type="button">金山文档授权</button><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkButton" type="button">导入表格链接</button><button class="dashboard-ai-import-button" id="dashboardAiImportButton" type="button">上传表格文件</button></div><input id="dashboardAiImportFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
   <div class="dashboard-ai-link-form" id="dashboardAiLinkForm" hidden><input class="dashboard-ai-link-input" id="dashboardAiImportLink" type="url" placeholder="粘贴公开可下载的表格链接；金山文档需开启任何人可查看并允许下载"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkCancel" type="button">取消</button><button class="dashboard-ai-import-button" id="dashboardAiImportLinkSubmit" type="button">读取并同步</button></div>
+  <div class="dashboard-ai-auth-form" id="dashboardAiAuthForm" hidden><input class="dashboard-ai-link-input" id="dashboardAiWebhook" type="url" placeholder="粘贴金山文档 AirScript 脚本 Webhook 链接"><input class="dashboard-ai-link-input" id="dashboardAiToken" type="password" autocomplete="off" placeholder="粘贴 AirScript 脚本令牌"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiCopyScript" type="button">复制读取脚本</button><button class="dashboard-ai-import-button secondary-import" id="dashboardAiAuthCancel" type="button">取消</button><button class="dashboard-ai-import-button" id="dashboardAiAuthSubmit" type="button">授权并同步</button></div>
   <section class="card dashboard-card dashboard-ai-card">
    <div class="section-title"><div><h2>AI生图产出</h2><p>按月份同步真实图片生成、采纳与素材复用数据。</p></div><span class="dashboard-ai-source" id="dashboardAiImageSource">待导入数据</span></div>
    <div class="dashboard-ai-metrics">
@@ -1293,10 +1296,18 @@ setInterval(()=>{
  const aiImportLinkForm=document.getElementById('dashboardAiLinkForm');
  const aiImportLink=document.getElementById('dashboardAiImportLink');
  const aiImportLinkSubmit=document.getElementById('dashboardAiImportLinkSubmit');
+ const aiAuthButton=document.getElementById('dashboardAiAuthButton');
+ const aiAuthForm=document.getElementById('dashboardAiAuthForm');
+ const aiWebhook=document.getElementById('dashboardAiWebhook');
+ const aiToken=document.getElementById('dashboardAiToken');
+ const aiAuthSubmit=document.getElementById('dashboardAiAuthSubmit');
+ const airScriptSource=`function main() {\n  var records = [];\n  var sheets = Application.Sheets;\n  for (var sheetIndex = 1; sheetIndex <= sheets.Count; sheetIndex++) {\n    var sheet = sheets.Item(sheetIndex);\n    var fields = sheet.FieldDescriptors;\n    var range = sheet.Views(1).RecordRange;\n    for (var row = 1; row <= range.Count; row++) {\n      var record = { __sheet: sheet.Name };\n      for (var column = 1; column <= fields.Count; column++) {\n        var name = fields.Item(column).Name;\n        try { record[name] = range(row, "@" + name).Value; } catch (error) {}\n      }\n      records.push(record);\n    }\n  }\n  return { records: records };\n}\nmain();`;
  const importAiData=async body=>{
   aiImportButton.disabled=true;
   aiImportLinkButton.disabled=true;
   aiImportLinkSubmit.disabled=true;
+  aiAuthButton.disabled=true;
+  aiAuthSubmit.disabled=true;
   aiImportMessage.textContent='正在读取并同步各月份 AI 生图与视频数据……';
   try{
    const response=await fetch('/api/dashboard-ai-uploads',{method:'POST',body});
@@ -1305,9 +1316,11 @@ setInterval(()=>{
    aiImportMessage.textContent=`已同步 ${result.months.length} 个月的 AI 生图与视频数据，可切换月份查看。`;
    aiImportLinkForm.hidden=true;
    aiImportLink.value='';
+   aiAuthForm.hidden=true;
+   aiToken.value='';
    await loadAiData(true);
   }catch(error){aiImportMessage.textContent=error.message}
-  finally{aiImportButton.disabled=false;aiImportLinkButton.disabled=false;aiImportLinkSubmit.disabled=false;aiImportFile.value=''}
+  finally{aiImportButton.disabled=false;aiImportLinkButton.disabled=false;aiImportLinkSubmit.disabled=false;aiAuthButton.disabled=false;aiAuthSubmit.disabled=false;aiImportFile.value=''}
  };
  aiImportButton.onclick=()=>{
   if(!currentUser?.is_admin){aiImportMessage.textContent='仅管理员可以上传 AI 产出数据。';return}
@@ -1315,8 +1328,34 @@ setInterval(()=>{
  };
  aiImportLinkButton.onclick=()=>{
   if(!currentUser?.is_admin){aiImportMessage.textContent='仅管理员可以导入 AI 产出数据。';return}
+  aiAuthForm.hidden=true;
   aiImportLinkForm.hidden=false;
   aiImportLink.focus();
+ };
+ aiAuthButton.onclick=()=>{
+  if(!currentUser?.is_admin){aiImportMessage.textContent='仅管理员可以配置金山文档授权。';return}
+  aiImportLinkForm.hidden=true;
+  aiAuthForm.hidden=false;
+  aiImportMessage.textContent='在金山多维表格中打开“脚本 → JS 脚本”，粘贴读取脚本，再复制脚本 Webhook 和脚本令牌。';
+  aiWebhook.focus();
+ };
+ document.getElementById('dashboardAiAuthCancel').onclick=()=>{aiAuthForm.hidden=true;aiToken.value=''};
+ document.getElementById('dashboardAiCopyScript').onclick=async()=>{
+  try{
+   if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(airScriptSource);
+   else{const temporary=document.createElement('textarea');temporary.value=airScriptSource;temporary.style.position='fixed';temporary.style.opacity='0';document.body.appendChild(temporary);temporary.select();const copied=document.execCommand('copy');temporary.remove();if(!copied)throw new Error('copy failed')}
+   aiImportMessage.textContent='读取脚本已复制，请粘贴到金山文档“脚本 → JS 脚本”并保存。';
+  }catch(_){aiImportMessage.textContent='脚本复制失败，请检查浏览器剪贴板权限。'}
+ };
+ aiAuthSubmit.onclick=()=>{
+  const webhook=aiWebhook.value.trim(),token=aiToken.value.trim();
+  if(!/^https:\/\/[^/]*kdocs\.cn\/api\/v3\/ide\/file\/[^/]+\/script\/[^/]+\/sync_task(?:\?.*)?$/i.test(webhook)){aiImportMessage.textContent='请填写金山文档脚本菜单中复制的官方 Webhook 链接。';aiWebhook.focus();return}
+  if(!token){aiImportMessage.textContent='请填写金山文档 AirScript 脚本令牌。';aiToken.focus();return}
+  const body=new FormData();
+  body.append('month',dashboardSelectedMonth());
+  body.append('webhook',webhook);
+  body.append('script_token',token);
+  void importAiData(body);
  };
  document.getElementById('dashboardAiImportLinkCancel').onclick=()=>{aiImportLinkForm.hidden=true;aiImportLink.value=''};
  aiImportLinkSubmit.onclick=()=>{
