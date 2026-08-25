@@ -632,10 +632,13 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-department-chart .section-title{align-items:flex-start;margin-bottom:12px}
 #dashboard .department-chart-total{display:flex;align-items:center;gap:8px;color:#585858;font-size:13px;line-height:24px;white-space:nowrap}
 #dashboard .department-chart-total b{color:#2962FF;font-size:16px;line-height:24px;font-weight:600}
+#dashboard .department-chart-legend{display:flex;align-items:center;justify-content:center;gap:22px;flex-wrap:wrap;padding:6px 0 2px}
+#dashboard .department-chart-legend>span{display:inline-flex;align-items:center;gap:7px;color:#585858;font-size:13px;line-height:20px;white-space:nowrap}
+#dashboard .department-chart-legend>span>i{display:block;width:10px;height:10px;flex:none;border-radius:2px}
 #dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:10px 24px 0}
 #dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:54px;left:24px;height:1px;background:#DBDCE0;content:""}
 #dashboard .dashboard-department-chart .bar-list>div{position:relative;z-index:1;display:flex!important;min-width:0;min-height:286px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0;border:0;background:transparent}
-#dashboard .dashboard-department-chart .bar-list>div>i{order:0;display:flex!important;width:clamp(44px,42%,76px);height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important}
+#dashboard .dashboard-department-chart .bar-list>div>i{order:0;display:flex!important;width:18px;height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important}
 #dashboard .dashboard-department-chart .bar-list>div>i>b{display:block;margin-bottom:8px;color:#262626;font-size:16px;line-height:22px;font-weight:600}
 #dashboard .dashboard-department-chart .bar-list>div>i>em{display:block;width:100%!important;height:0;border-radius:4px 4px 0 0;transition:height .25s ease}
 #dashboard .dashboard-department-chart .bar-list>div>span{order:1;overflow:hidden;max-width:100%;color:#262626!important;font-size:14px!important;line-height:20px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
@@ -1108,6 +1111,17 @@ setInterval(()=>{
   total.className='department-chart-total';
   total.innerHTML='<span>本月总量</span><b id="dashboardDepartmentTotal">0</b>';
   departmentCard.querySelector('.section-title')?.appendChild(total);
+  if(departmentList){
+   const legend=document.createElement('div');
+   legend.className='department-chart-legend';
+   [['国内电商','#FF8707'],['海外电商','#00B309'],['产品市场','#F60000'],['线下物料','#7B47DF'],['软件私域','#75B6FF']].forEach(([name,color])=>{
+    const item=document.createElement('span'),marker=document.createElement('i');
+    marker.style.backgroundColor=color;
+    item.append(marker,document.createTextNode(name));
+    legend.appendChild(item);
+   });
+   departmentCard.insertBefore(legend,departmentList);
+  }
   departmentList?.querySelectorAll(':scope>div').forEach(row=>{
    const amount=row.querySelector('b'),column=row.querySelector('i');
    if(amount&&column)column.prepend(amount);
