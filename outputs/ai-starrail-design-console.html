@@ -765,7 +765,7 @@ const uniqueTasks=tasks=>[...new Map(tasks.filter(Boolean).map(task=>[taskSummar
 const taskDateMonth=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})/);return match?`${match[1]}-${match[2]}`:''};
 const taskIsCompleted=task=>taskSummaryStage(task)==='验收完结'||taskSummaryStage(task)==='已完成'||task?.status==='completed';
 const taskCompletionMonth=task=>{const history=[...(task?.history||[])].reverse(),event=history.find(item=>item?.action==='acceptance_pass'||item?.to_stage==='验收完结');return taskDateMonth(event?.at||task?.completed_at||task?.finished_at||task?.updated_at||task?.final_delivery_date)};
-const taskSubmissionMonth=task=>taskDateMonth(task?.submit_date||task?.created_at||task?.submitted_at||task?.updated_at);
+const taskSubmissionMonth=task=>taskDateMonth(task?.created_at||task?.submitted_at||task?.submit_date||task?.updated_at);
 function taskMatchesSelectedMonth(task){
  const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
  if(!taskIsCompleted(task)&&selected===taskCenterCurrentMonth)return true;
@@ -953,7 +953,10 @@ setInterval(()=>{
  };
  const refresh=refreshDashboardFromTasks;
  refreshDashboardFromTasks=async function(...args){
-  try{return await refresh.apply(this,args)}finally{updateCompletedMonthlyOutput()}
+  try{return await refresh.apply(this,args)}finally{
+   if(document.getElementById('taskboard')?.classList.contains('active')&&!taskCenterMonthControl.hidden)applyTaskCenterMonthFilter();
+   updateCompletedMonthlyOutput();
+  }
  };
  taskCenterMonthInput.addEventListener('change',updateCompletedMonthlyOutput);
  updateCompletedMonthlyOutput();
