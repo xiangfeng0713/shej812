@@ -633,7 +633,7 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .department-chart-total{display:flex;align-items:center;gap:8px;color:#585858;font-size:13px;line-height:24px;white-space:nowrap}
 #dashboard .department-chart-total b{color:#2962FF;font-size:16px;line-height:24px;font-weight:600}
 #dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:16px 24px 0}
-#dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:74px;left:24px;height:1px;background:#DBDCE0;content:""}
+#dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:54px;left:24px;height:1px;background:#DBDCE0;content:""}
 #dashboard .dashboard-department-chart .bar-list>div{position:relative;z-index:1;display:flex!important;min-width:0;min-height:286px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0;border:0;background:transparent}
 #dashboard .dashboard-department-chart .department-chart-columns{order:0;display:flex;align-items:flex-end;justify-content:center;gap:18px;height:232px}
 #dashboard .dashboard-department-chart .department-chart-columns>i{display:flex!important;width:18px;height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important;cursor:pointer}
@@ -645,8 +645,7 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-department-chart .department-chart-columns>.department-video-column>em{background:color-mix(in srgb,var(--department-column-color) 42%,transparent)!important}
 #dashboard .dashboard-department-chart .department-chart-columns>.department-video-column:hover>em{background:color-mix(in srgb,var(--department-column-color) 68%,transparent)!important}
 #dashboard .dashboard-department-chart .bar-list>div>span{order:1;overflow:hidden;max-width:100%;color:#262626!important;font-size:14px!important;line-height:20px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
-#dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;display:flex;min-height:40px;flex-direction:column;align-items:center;color:#585858;font-size:13px;line-height:20px;text-align:center}
-#dashboard .dashboard-department-chart .department-chart-share .department-share-rate{color:#2962FF;font-weight:600}
+#dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;min-height:20px;color:#585858;font-size:13px;line-height:20px;text-align:center}
 @media(max-width:760px){#dashboard .dashboard-department-chart .bar-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}#dashboard .dashboard-department-chart .bar-list:after{display:none}}
 #dashboard .dashboard-ai-source{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
 #dashboard .dashboard-ai-metric{border-color:#E7E8EA!important;background:#F8F9FD!important}
@@ -1131,13 +1130,39 @@ setInterval(()=>{
    }
    const share=document.createElement('small');
    share.className='department-chart-share';
-   share.innerHTML='<span class="department-share-rate">需求占比 0%</span><span class="department-share-detail">图片 0 张 · 视频 0 条</span>';
+   share.textContent='图片 0 张 · 视频 0 条';
    row.appendChild(share);
   });
   dashboard.insertBefore(departmentCard,overview);
  }
  const introduction=dashboard.querySelector('.dashboard-head p');
  if(introduction)introduction.textContent='任务产出、部门分布、AI 生图与视频应用数据概览。';
+ const dashboardMonthInput=document.getElementById('dashboardMonth');
+ const dashboardMonthStorageKey='ai-visual-dashboard-month';
+ if(dashboardMonthInput){
+  const today=new Date();
+  dashboardMonthInput.innerHTML=Array.from({length:24},(_,index)=>{
+   const month=new Date(today.getFullYear(),today.getMonth()-index,1),value=`${month.getFullYear()}-${String(month.getMonth()+1).padStart(2,'0')}`;
+   return `<option value="${value}">${month.getFullYear()} 年 ${month.getMonth()+1} 月</option>`;
+  }).join('');
+  let savedMonth='';
+  try{savedMonth=localStorage.getItem(dashboardMonthStorageKey)||''}catch(_){}
+  dashboardMonthInput.value=[...dashboardMonthInput.options].some(option=>option.value===savedMonth)?savedMonth:taskCenterCurrentMonth;
+  dashboardMonthInput.disabled=false;
+ }
+ const dashboardSelectedMonth=()=>dashboardMonthInput?.value||taskCenterCurrentMonth;
+ const dashboardMonthTasks=month=>(sharedTasks||[]).filter(task=>{
+  const submitted=taskSubmissionMonth(task);
+  if(month>taskCenterCurrentMonth||submitted&&month<submitted)return false;
+  if(!taskIsCompleted(task))return true;
+  const completed=taskCompletionMonth(task);
+  return completed?month<=completed:month===(submitted||taskCenterCurrentMonth);
+ }).map(task=>{
+  if(month===taskCenterCurrentMonth||taskIsCompleted(task)&&taskCompletionMonth(task)===month)return task;
+  const history=task?.history||[],past=history.filter(event=>{const recorded=taskDateMonth(event?.at);return recorded&&recorded<=month}),latest=past[past.length-1],future=history.find(event=>{const recorded=taskDateMonth(event?.at);return recorded&&recorded>month});
+  const stage=latest?.to_stage||future?.from_stage||'部门负责人审批';
+  return {...task,stage,stage_label:stage,current_stage:stage,current_stage_label:stage,status:'in_progress'};
+ });
  const metricNumber=value=>{
   const number=Number.parseFloat(String(value??'').replace(/[^\d.-]/g,''));
   return Number.isFinite(number)&&number>=0?number:0;
@@ -1146,12 +1171,13 @@ setInterval(()=>{
  const formatRate=(adopted,generated)=>generated?`${new Intl.NumberFormat('zh-CN',{maximumFractionDigits:1}).format(adopted/generated*100)}%`:'0%';
  const put=(id,value)=>{const element=document.getElementById(id);if(element)element.textContent=value;};
  const updateTaskMetrics=()=>{
-  const currentMonth=taskCenterCurrentMonth;
-  const monthlyTasks=(sharedTasks||[]).filter(task=>{
-   const submitted=taskSubmissionMonth(task);
-   if(submitted&&submitted>currentMonth)return false;
-   return !taskIsCompleted(task)||taskCompletionMonth(task)===currentMonth;
-  });
+  const currentMonth=dashboardSelectedMonth();
+  const monthlyTasks=dashboardMonthTasks(currentMonth);
+  if(dashboardMonthInput)dashboardMonthInput.disabled=false;
+  const period=dashboard.querySelector('.dashboard-period>span');
+  if(period)period.textContent='统计月份';
+  if(dashboard.classList.contains('active')&&typeof renderLiveDashboard==='function')renderLiveDashboard(monthlyTasks);
+  put('outputMonth',`${currentMonth.slice(0,4)} 年 ${Number(currentMonth.slice(5,7))} 月`);
   const completed=monthlyTasks.filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===currentMonth);
   const waiting=monthlyTasks.filter(task=>!taskIsCompleted(task));
   const total=monthlyTasks.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
@@ -1188,6 +1214,8 @@ setInterval(()=>{
   const videoAmounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department&&task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
   const imageTotal=imageAmounts.reduce((sum,value)=>sum+value,0),videoTotal=videoAmounts.reduce((sum,value)=>sum+value,0),departmentTotal=imageTotal+videoTotal;
   const maximum=Math.max(...imageAmounts,...videoAmounts,1);
+  const departmentPeriod=dashboard.querySelector('.department-chart-total>span');
+  if(departmentPeriod)departmentPeriod.textContent=currentMonth===taskCenterCurrentMonth?'本月总量':`${Number(currentMonth.slice(5,7))}月总量`;
   put('dashboardDepartmentTotal',`${formatCount(imageTotal)} 张 / ${formatCount(videoTotal)} 条`);
   dashboard.querySelectorAll('.dashboard-department-chart .bar-list>div').forEach((row,index)=>{
    const images=imageAmounts[index]||0,videos=videoAmounts[index]||0;
@@ -1198,9 +1226,7 @@ setInterval(()=>{
     if(column)column.setAttribute('aria-label',`${departments[index]}${type} ${formatCount(value)} ${unit}，需求占比 ${formatRate(images+videos,departmentTotal)}`);
    });
    const share=row.querySelector('.department-chart-share');
-   const shareRate=share?.querySelector('.department-share-rate'),shareDetail=share?.querySelector('.department-share-detail');
-   if(shareRate)shareRate.textContent=`需求占比 ${formatRate(images+videos,departmentTotal)}`;
-   if(shareDetail)shareDetail.textContent=`图片 ${formatCount(images)} 张 · 视频 ${formatCount(videos)} 条`;
+   if(share)share.textContent=`图片 ${formatCount(images)} 张 · 视频 ${formatCount(videos)} 条`;
   });
   put('dashboardVideoDelivered',`${formatCount(videos)} 条`);
   const completionLabel=dashboard.querySelector('.done-ring')?.parentElement?.querySelector(':scope > span');
@@ -1224,19 +1250,28 @@ setInterval(()=>{
   put('dashboardAiVideoSource',Object.keys(video).length?'流程 + AI 复盘':'流程实时同步');
   updateTaskMetrics();
  };
- let aiLoading=false,lastAiLoad=0;
+ let aiLoading=false,lastAiLoad=0,lastAiMonth='';
  const loadAiData=async(force=false)=>{
-  if(!currentUser||aiLoading||(!force&&Date.now()-lastAiLoad<15000))return;
+  const selectedMonth=dashboardSelectedMonth();
+  if(!currentUser||aiLoading||(!force&&lastAiMonth===selectedMonth&&Date.now()-lastAiLoad<15000))return;
   aiLoading=true;
   lastAiLoad=Date.now();
+  lastAiMonth=selectedMonth;
   try{
-   const data=await sharedApi(`/api/review-settings?month=${encodeURIComponent(taskCenterCurrentMonth)}`);
-   renderAiData(data);
+   const data=await sharedApi(`/api/review-settings?month=${encodeURIComponent(selectedMonth)}`);
+   if(dashboardSelectedMonth()===selectedMonth)renderAiData(data);
   }catch(_){
    put('dashboardAiImageSource','AI 数据待录入');
   }finally{
    aiLoading=false;
+   if(dashboardSelectedMonth()!==selectedMonth)void loadAiData(true);
   }
+ };
+ if(dashboardMonthInput)dashboardMonthInput.onchange=()=>{
+  if(!dashboardMonthInput.value)dashboardMonthInput.value=taskCenterCurrentMonth;
+  try{localStorage.setItem(dashboardMonthStorageKey,dashboardMonthInput.value)}catch(_){}
+  renderAiData({});
+  void loadAiData(true);
  };
  const reviewRenderer=renderReviewImportedData;
  renderReviewImportedData=function(data){
