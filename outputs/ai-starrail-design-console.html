@@ -579,10 +579,24 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 /* 数据看板仅展示统计数据；任务执行汇总统一归属任务中心 */
 #dashboard .dashboard-main{display:none!important}
 #dashboard .dashboard-layout{display:block!important}
-#dashboard .dashboard-side{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:20px}
+#dashboard .dashboard-side{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:20px}
 #dashboard .dashboard-side>.dashboard-card{width:100%;min-width:0;margin:0!important;grid-area:auto!important}
 #dashboard>.dashboard-card{margin-top:20px}
-@media(max-width:900px){#dashboard .dashboard-side{grid-template-columns:minmax(0,1fr)}}
+#dashboard .dash-ring small{display:block!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#585858!important;font-size:13px!important;line-height:18px!important;font-weight:400!important;box-shadow:none!important}
+#dashboard .dashboard-ai-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:20px;margin-top:20px}
+#dashboard .dashboard-ai-card{min-width:0;margin:0!important}
+#dashboard .dashboard-ai-card .section-title{align-items:flex-start;margin-bottom:16px}
+#dashboard .dashboard-ai-card .section-title h2{margin:0;font-size:18px;line-height:26px}
+#dashboard .dashboard-ai-card .section-title p{margin:4px 0 0;color:#585858;font-size:13px;line-height:20px}
+#dashboard .dashboard-ai-source{flex:none;color:#737780;font-size:12px;line-height:22px;white-space:nowrap}
+#dashboard .dashboard-ai-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#dashboard .dashboard-ai-metric{min-width:0;min-height:88px;padding:12px 14px;border:1px solid #E7E8EA;border-radius:8px;background:#F8F9FD}
+#dashboard .dashboard-ai-metric span{display:block;color:#585858;font-size:13px;line-height:20px}
+#dashboard .dashboard-ai-metric b{display:block;overflow:hidden;margin-top:5px;color:#2962FF;font-size:22px;line-height:30px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+#dashboard .dashboard-ai-metric.adopted b{color:#35B188}
+#dashboard .dashboard-ai-metric.rate b{color:#7B47DF}
+#dashboard .dashboard-ai-metric.material b{color:#F29849}
+@media(max-width:900px){#dashboard .dashboard-side,#dashboard .dashboard-ai-grid{grid-template-columns:minmax(0,1fr)}}
 /* 部门任务汇总：置顶加急面板统一规范字号、中性色与按钮样式 */
 #taskCenterSummaryHost #pinBox{margin-top:16px;padding:16px;border:1px solid #DBDCE0;border-radius:8px;background:#fff;color:#262626}
 #taskCenterSummaryHost #pinBox>b{display:block;color:#262626;font-size:16px;line-height:24px;font-weight:600}
@@ -999,6 +1013,110 @@ setInterval(()=>{
  updateCompletedMonthlyOutput();
 })();
 </script>
+<script id="v2-dashboard-ai-overview-20260825">
+(()=>{
+ const dashboard=document.getElementById('dashboard');
+ if(!dashboard)return;
+ const personalOutput=[...dashboard.children].find(section=>section.matches('section.dashboard-card')&&section.querySelector('h2')?.textContent.trim()==='个人月度产出');
+ if(!personalOutput)return;
+ const overview=document.createElement('div');
+ overview.className='dashboard-ai-grid';
+ overview.innerHTML=`
+  <section class="card dashboard-card dashboard-ai-card">
+   <div class="section-title"><div><h2>AI 生图数据</h2><p>同步设计复盘中的真实图片生成与采纳数据。</p></div><span class="dashboard-ai-source" id="dashboardAiImageSource">待录入复盘</span></div>
+   <div class="dashboard-ai-metrics">
+    <div class="dashboard-ai-metric"><span>AI 生成图片</span><b id="dashboardAiImageGenerated">0 张</b></div>
+    <div class="dashboard-ai-metric adopted"><span>实际采纳图片</span><b id="dashboardAiImageAdopted">0 张</b></div>
+    <div class="dashboard-ai-metric rate"><span>图片采纳率</span><b id="dashboardAiImageRate">0%</b></div>
+    <div class="dashboard-ai-metric material"><span>可复用提示词 / 素材</span><b id="dashboardAiImageReusable">0 条</b></div>
+   </div>
+  </section>
+  <section class="card dashboard-card dashboard-ai-card">
+   <div class="section-title"><div><h2>视频与 AI 视频数据</h2><p>按实际交付和设计复盘统计视频产出。</p></div><span class="dashboard-ai-source" id="dashboardAiVideoSource">流程实时同步</span></div>
+   <div class="dashboard-ai-metrics">
+    <div class="dashboard-ai-metric"><span>本月交付视频</span><b id="dashboardVideoDelivered">0 条</b></div>
+    <div class="dashboard-ai-metric material"><span>AI 生成视频</span><b id="dashboardAiVideoGenerated">0 条</b></div>
+    <div class="dashboard-ai-metric adopted"><span>AI 实际采纳</span><b id="dashboardAiVideoAdopted">0 条</b></div>
+    <div class="dashboard-ai-metric rate"><span>AI 视频采纳率</span><b id="dashboardAiVideoRate">0%</b></div>
+   </div>
+  </section>`;
+ dashboard.insertBefore(overview,personalOutput);
+ const introduction=dashboard.querySelector('.dashboard-head p');
+ if(introduction)introduction.textContent='任务产出、部门分布、AI 生图与视频应用数据概览。';
+ const metricNumber=value=>{
+  const number=Number.parseFloat(String(value??'').replace(/[^\d.-]/g,''));
+  return Number.isFinite(number)&&number>=0?number:0;
+ };
+ const formatCount=value=>new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2}).format(metricNumber(value));
+ const formatRate=(adopted,generated)=>generated?`${new Intl.NumberFormat('zh-CN',{maximumFractionDigits:1}).format(adopted/generated*100)}%`:'0%';
+ const put=(id,value)=>{const element=document.getElementById(id);if(element)element.textContent=value;};
+ const updateTaskMetrics=()=>{
+  const currentMonth=taskCenterCurrentMonth;
+  const monthlyTasks=(sharedTasks||[]).filter(task=>{
+   const submitted=taskSubmissionMonth(task);
+   if(submitted&&submitted>currentMonth)return false;
+   return !taskIsCompleted(task)||taskCompletionMonth(task)===currentMonth;
+  });
+  const completed=monthlyTasks.filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===currentMonth);
+  const total=monthlyTasks.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  const completedTotal=completed.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  const videos=completed.filter(task=>task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  put('dashboardVideoDelivered',`${formatCount(videos)} 条`);
+  const completionLabel=dashboard.querySelector('.done-ring')?.parentElement?.querySelector(':scope > span');
+  if(completionLabel)completionLabel.textContent=`完成率 ${formatRate(completedTotal,total)}`;
+ };
+ const renderAiData=data=>{
+  const ai=data?.ai_data||{};
+  const image=ai.image||{},video=ai.video||{};
+  const imageGenerated=metricNumber(image.generated),imageAdopted=metricNumber(image.adopted);
+  const videoGenerated=metricNumber(video.generated),videoAdopted=metricNumber(video.adopted);
+  put('dashboardAiImageGenerated',`${formatCount(imageGenerated)} 张`);
+  put('dashboardAiImageAdopted',`${formatCount(imageAdopted)} 张`);
+  put('dashboardAiImageRate',formatRate(imageAdopted,imageGenerated));
+  const reusable=String(image.reusable??'').trim();
+  put('dashboardAiImageReusable',reusable?(/^\d+(?:\.\d+)?$/.test(reusable)?`${formatCount(reusable)} 条`:reusable):'0 条');
+  document.getElementById('dashboardAiImageReusable').title=reusable;
+  put('dashboardAiVideoGenerated',`${formatCount(videoGenerated)} 条`);
+  put('dashboardAiVideoAdopted',`${formatCount(videoAdopted)} 条`);
+  put('dashboardAiVideoRate',formatRate(videoAdopted,videoGenerated));
+  put('dashboardAiImageSource',Object.keys(image).length?'已同步设计复盘':'待录入复盘');
+  put('dashboardAiVideoSource',Object.keys(video).length?'流程 + AI 复盘':'流程实时同步');
+  updateTaskMetrics();
+ };
+ let aiLoading=false,lastAiLoad=0;
+ const loadAiData=async(force=false)=>{
+  if(!currentUser||aiLoading||(!force&&Date.now()-lastAiLoad<15000))return;
+  aiLoading=true;
+  lastAiLoad=Date.now();
+  try{
+   const data=await sharedApi(`/api/review-settings?month=${encodeURIComponent(taskCenterCurrentMonth)}`);
+   renderAiData(data);
+  }catch(_){
+   put('dashboardAiImageSource','AI 数据待录入');
+  }finally{
+   aiLoading=false;
+  }
+ };
+ const reviewRenderer=renderReviewImportedData;
+ renderReviewImportedData=function(data){
+  const result=reviewRenderer.apply(this,arguments);
+  renderAiData(data);
+  return result;
+ };
+ const refresh=refreshDashboardFromTasks;
+ refreshDashboardFromTasks=async function(...args){
+  try{return await refresh.apply(this,args)}finally{
+   updateTaskMetrics();
+   if(dashboard.classList.contains('active'))void loadAiData();
+  }
+ };
+ document.querySelector('.nav button[data-page="dashboard"]')?.addEventListener('click',()=>{
+  updateTaskMetrics();
+  void loadAiData(true);
+ });
+ renderAiData({});
+})();
+</script>
 <script id="v2-global-status-tags-20260824">
 (()=>{
  const statusTones=new Map([
@@ -1008,7 +1126,7 @@ setInterval(()=>{
  const statusClasses=['flow-status-tag','flow-status-success','flow-status-unstarted','flow-status-progress','flow-status-overdue'];
  const mark=element=>{
   if(!(element instanceof HTMLElement)||element.matches('option,input,select,textarea')||element.children.length)return;
-  if(element.closest('.flow .node,#taskCenterSummaryHost .kanban-title,#taskCenterSummaryHost .type-flow-col>header,#taskCenterSummaryHost .personal-live-column>header')){
+  if(element.closest('.flow .node,#dashboard .dash-ring,#taskCenterSummaryHost .kanban-title,#taskCenterSummaryHost .type-flow-col>header,#taskCenterSummaryHost .personal-live-column>header')){
    element.classList.remove(...statusClasses);
    delete element.dataset.flowStatus;
    return;
