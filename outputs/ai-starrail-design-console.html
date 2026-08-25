@@ -1098,7 +1098,7 @@ setInterval(()=>{
  overview.className='dashboard-ai-grid';
  overview.innerHTML=`
   <div class="dashboard-ai-import"><span class="dashboard-ai-import-note" id="dashboardAiImportMessage">支持上传表格文件，或通过表格链接同步各月份 AI 产出数据。</span><div class="dashboard-ai-import-actions"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkButton" type="button">导入表格链接</button><button class="dashboard-ai-import-button" id="dashboardAiImportButton" type="button">上传表格文件</button></div><input id="dashboardAiImportFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
-  <div class="dashboard-ai-link-form" id="dashboardAiLinkForm" hidden><input class="dashboard-ai-link-input" id="dashboardAiImportLink" type="url" placeholder="粘贴公开可访问的多维表格 XLSX 下载或导出链接"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkCancel" type="button">取消</button><button class="dashboard-ai-import-button" id="dashboardAiImportLinkSubmit" type="button">读取并同步</button></div>
+  <div class="dashboard-ai-link-form" id="dashboardAiLinkForm" hidden><input class="dashboard-ai-link-input" id="dashboardAiImportLink" type="url" placeholder="粘贴公开可下载的表格链接；金山文档需开启任何人可查看并允许下载"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkCancel" type="button">取消</button><button class="dashboard-ai-import-button" id="dashboardAiImportLinkSubmit" type="button">读取并同步</button></div>
   <section class="card dashboard-card dashboard-ai-card">
    <div class="section-title"><div><h2>AI生图产出</h2><p>按月份同步真实图片生成、采纳与素材复用数据。</p></div><span class="dashboard-ai-source" id="dashboardAiImageSource">待导入数据</span></div>
    <div class="dashboard-ai-metrics">

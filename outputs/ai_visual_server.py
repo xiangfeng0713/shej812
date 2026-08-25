@@ -367,6 +367,8 @@ def download_dashboard_ai_workbook(source_url: str) -> bytes:
     try:
         request = Request(source_url, headers={"User-Agent": "AIVisualConsole/2.0", "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream"})
         with build_opener(SafeRedirectHandler()).open(request, timeout=15) as response:
+            final_url = response.geturl()
+            response_type = str(response.headers.get("Content-Type", "")).casefold()
             declared_size = response.headers.get("Content-Length", "")
             if declared_size.isdigit() and int(declared_size) > MAX_REVIEW_UPLOAD_BYTES:
                 raise ValueError("链接中的 AI 产出表格不能超过 5 MB。")
@@ -376,6 +378,10 @@ def download_dashboard_ai_workbook(source_url: str) -> bytes:
     if len(content) > MAX_REVIEW_UPLOAD_BYTES:
         raise ValueError("链接中的 AI 产出表格不能超过 5 MB。")
     if not content.startswith(b"PK"):
+        source_host = (urlparse(source_url).hostname or "").casefold()
+        final_path = urlparse(final_url).path.casefold()
+        if source_host.endswith("kdocs.cn") and (any(token in final_path for token in ("passport", "singlesign", "login", "signin")) or "text/html" in response_type):
+            raise ValueError("该金山文档分享链接需要登录授权，系统无法直接读取。请在金山文档开启“任何人可查看”并允许下载，使用导出链接；或下载 XLSX 后点击“上传表格文件”。")
         raise ValueError("该链接没有返回 XLSX 表格，请使用多维表格的公开下载或导出链接。")
     return content
 
