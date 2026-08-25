@@ -580,7 +580,7 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 /* 数据看板仅展示统计数据；任务执行汇总统一归属任务中心 */
 #dashboard .dashboard-main{display:none!important}
 #dashboard .dashboard-layout{display:block!important}
-#dashboard .dashboard-side{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:20px}
+#dashboard .dashboard-side{position:static!important;top:auto!important;height:auto!important;min-height:0!important;max-height:none!important;padding:0!important;overflow:visible!important;align-self:auto!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:20px;background:transparent!important}
 #dashboard .dashboard-side>.dashboard-card{width:100%;min-width:0;margin:0!important;grid-area:auto!important}
 #dashboard>.dashboard-card{margin-top:20px}
 #dashboard .dash-ring small{display:block!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#585858!important;font-size:13px!important;line-height:18px!important;font-weight:400!important;box-shadow:none!important}
@@ -598,6 +598,49 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-ai-metric.rate b{color:#7B47DF}
 #dashboard .dashboard-ai-metric.material b{color:#F29849}
 @media(max-width:900px){#dashboard .dashboard-side,#dashboard .dashboard-ai-grid{grid-template-columns:minmax(0,1fr)}}
+/* 数据看板：严格采用搭建规范的字级、主色、功能色与中性色 */
+#dashboard,#dashboard button,#dashboard input,#dashboard select,#dashboard textarea{font-family:Arial,"Microsoft YaHei",sans-serif}
+#dashboard .dashboard-head h1{color:#262626!important;font-size:22px!important;line-height:33px!important;font-weight:400!important}
+#dashboard .dashboard-head p,#dashboard .dashboard-card .section-title p{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .dashboard-card .section-title h2{color:#262626!important;font-size:18px!important;line-height:27px!important;font-weight:400!important}
+#dashboard .dashboard-period{border-color:#DBDCE0!important;background:#fff!important;color:#585858!important;font-size:13px!important}
+#dashboard .dashboard-period span,#dashboard .dashboard-period select{font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .dashboard-period select{color:#262626!important;background:#fff!important}
+#dashboard .metric-card,#dashboard .dashboard-card{border-color:#DBDCE0!important;background:#fff!important}
+#dashboard .metric-card>span{display:block!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:#585858!important;font-size:14px!important;line-height:21px!important;font-weight:400!important;box-shadow:none!important}
+#dashboard .metric-card>b{font-size:22px!important;line-height:33px!important;font-weight:600!important}
+#dashboard .metric-card>small{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .metric-demand>b,#dashboard .metric-progress>b{color:#2962FF!important}
+#dashboard .todo-metric>b{color:#FE585B!important}
+#dashboard .metric-delivered>b{color:#35B188!important}
+#dashboard .overdue-metric>b{color:#F29849!important}
+#dashboard .todo-ring{background:conic-gradient(#FE585B 0 22%,#EAEDF2 22% 100%)!important}
+#dashboard .done-ring{background:conic-gradient(#35B188 0 71%,#EAEDF2 71% 100%)!important}
+#dashboard .risk-ring{background:conic-gradient(#F29849 0 13%,#EAEDF2 13% 100%)!important}
+#dashboard .dash-ring:before{background:#fff!important}
+#dashboard .dash-ring>b{color:#262626!important;font-size:18px!important;line-height:25px!important;font-weight:600!important}
+#dashboard .ring-item>span,#dashboard .bar-list>div>span,#dashboard .bar-list>div>b{font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .ring-item>span,#dashboard .bar-list>div>span{color:#585858!important}
+#dashboard .bar-list>div>b{color:#262626!important}
+#dashboard .bar-list>div>i{background:#EAEDF2!important}
+#dashboard .bar-list>div:nth-child(1)>i>em{background:#FF8707!important}
+#dashboard .bar-list>div:nth-child(2)>i>em{background:#00B309!important}
+#dashboard .bar-list>div:nth-child(3)>i>em{background:#F60000!important}
+#dashboard .bar-list>div:nth-child(4)>i>em{background:#7B47DF!important}
+#dashboard .bar-list>div:nth-child(5)>i>em{background:#75B6FF!important}
+#dashboard .dashboard-ai-source{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .dashboard-ai-metric{border-color:#E7E8EA!important;background:#F8F9FD!important}
+#dashboard .dashboard-ai-metric>span{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
+#dashboard .dashboard-ai-metric>b{font-size:22px!important;line-height:33px!important;font-weight:600!important}
+#dashboard .output-table{border-color:#DBDCE0!important}
+#dashboard .output-table .data-note{border-color:#E7E8EA!important;color:#585858!important;font-size:13px!important;line-height:20px!important}
+#dashboard .output-head{background:#F8F9FD!important;color:#585858!important}
+#dashboard .output-head>span,#dashboard .output-row>span,#dashboard .output-row>b{font-size:13px!important;line-height:20px!important}
+#dashboard .output-head>span,#dashboard .output-row>span{color:#585858!important;font-weight:400!important}
+#dashboard .output-row>b{color:#262626!important;font-weight:600!important}
+#dashboard .output-row .good{color:#35B188!important}
+#dashboard .output-row .warn{color:#F29849!important}
+#dashboard .dashboard-card .hint{color:#2962FF!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
 /* 部门任务汇总：置顶加急面板统一规范字号、中性色与按钮样式 */
 #taskCenterSummaryHost #pinBox{margin-top:16px;padding:16px;border:1px solid #DBDCE0;border-radius:8px;background:#fff;color:#262626}
 #taskCenterSummaryHost #pinBox>b{display:block;color:#262626;font-size:16px;line-height:24px;font-weight:600}
@@ -1127,7 +1170,7 @@ setInterval(()=>{
  const statusClasses=['flow-status-tag','flow-status-success','flow-status-unstarted','flow-status-progress','flow-status-overdue'];
  const mark=element=>{
   if(!(element instanceof HTMLElement)||element.matches('option,input,select,textarea')||element.children.length)return;
-  if(element.closest('.flow .node,#dashboard .dash-ring,#taskCenterSummaryHost .kanban-title,#taskCenterSummaryHost .type-flow-col>header,#taskCenterSummaryHost .personal-live-column>header')){
+  if(element.closest('.flow .node,#dashboard .dash-ring,#dashboard .metric-card>span,#taskCenterSummaryHost .kanban-title,#taskCenterSummaryHost .type-flow-col>header,#taskCenterSummaryHost .personal-live-column>header')){
    element.classList.remove(...statusClasses);
    delete element.dataset.flowStatus;
    return;
