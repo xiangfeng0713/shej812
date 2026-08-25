@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import ipaddress
 import io
 import json
 import os
 import posixpath
 import re
 import secrets
+import socket
 import time
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -20,6 +22,8 @@ from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from xml.etree import ElementTree
 
 
@@ -339,6 +343,41 @@ def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict[str
     if not results:
         raise ValueError("未识别到 AI 产出数据，请在表格中设置月份、AI 生成图片/视频、实际采纳图片/视频及可复用提示词/素材字段。")
     return results
+
+
+def download_dashboard_ai_workbook(source_url: str) -> bytes:
+    """Download only publicly accessible HTTPS spreadsheets, never LAN resources."""
+    def validate_url(value: str) -> None:
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or len(value) > 2048:
+            raise ValueError("请填写公开可访问的 HTTPS 表格下载或导出链接。")
+        try:
+            addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        except (socket.gaierror, UnicodeError, ValueError) as error:
+            raise ValueError("无法解析该表格链接，请检查网址是否正确。") from error
+        if not addresses or any(not ipaddress.ip_address(address[4][0]).is_global for address in addresses):
+            raise ValueError("出于安全考虑，不允许读取本机、局域网或内部服务链接。")
+
+    class SafeRedirectHandler(HTTPRedirectHandler):
+        def redirect_request(self, request, response, code, message, headers, new_url):
+            validate_url(new_url)
+            return super().redirect_request(request, response, code, message, headers, new_url)
+
+    validate_url(source_url)
+    try:
+        request = Request(source_url, headers={"User-Agent": "AIVisualConsole/2.0", "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream"})
+        with build_opener(SafeRedirectHandler()).open(request, timeout=15) as response:
+            declared_size = response.headers.get("Content-Length", "")
+            if declared_size.isdigit() and int(declared_size) > MAX_REVIEW_UPLOAD_BYTES:
+                raise ValueError("链接中的 AI 产出表格不能超过 5 MB。")
+            content = response.read(MAX_REVIEW_UPLOAD_BYTES + 1)
+    except (HTTPError, URLError, TimeoutError, OSError) as error:
+        raise ValueError("无法读取该表格链接，请确认链接公开可访问且无需登录。") from error
+    if len(content) > MAX_REVIEW_UPLOAD_BYTES:
+        raise ValueError("链接中的 AI 产出表格不能超过 5 MB。")
+    if not content.startswith(b"PK"):
+        raise ValueError("该链接没有返回 XLSX 表格，请使用多维表格的公开下载或导出链接。")
+    return content
 
 
 def parse_review_action_sheet(cells: dict[str, str]) -> dict:
@@ -987,18 +1026,20 @@ class Handler(SimpleHTTPRequestHandler):
             if not parsed:
                 return
             fields, uploaded = parsed
-            if not uploaded:
-                self.send_json({"error": "请选择 AI 产出 XLSX 数据表格。"}, HTTPStatus.BAD_REQUEST)
-                return
             month = fields.get("month", "")
-            filename, content = uploaded
             if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
                 self.send_json({"error": "请选择正确的统计月份。"}, HTTPStatus.BAD_REQUEST)
                 return
-            if Path(filename).suffix.lower() != ".xlsx" or len(filename) > 120 or not content.startswith(b"PK"):
-                self.send_json({"error": "仅支持有效的 XLSX 多维数据表格。"}, HTTPStatus.BAD_REQUEST)
-                return
             try:
+                source_url = fields.get("link", "").strip()
+                if source_url:
+                    content = download_dashboard_ai_workbook(source_url)
+                elif uploaded:
+                    filename, content = uploaded
+                    if Path(filename).suffix.lower() != ".xlsx" or len(filename) > 120 or not content.startswith(b"PK"):
+                        raise ValueError("仅支持有效的 XLSX 多维数据表格。")
+                else:
+                    raise ValueError("请选择 AI 产出 XLSX 表格，或填写公开可访问的表格链接。")
                 imported = parse_dashboard_ai_workbook(content, month)
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
