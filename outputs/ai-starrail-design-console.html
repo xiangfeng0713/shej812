@@ -636,10 +636,14 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:74px;left:24px;height:1px;background:#DBDCE0;content:""}
 #dashboard .dashboard-department-chart .bar-list>div{position:relative;z-index:1;display:flex!important;min-width:0;min-height:286px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0;border:0;background:transparent}
 #dashboard .dashboard-department-chart .department-chart-columns{order:0;display:flex;align-items:flex-end;justify-content:center;gap:18px;height:232px}
-#dashboard .dashboard-department-chart .department-chart-columns>i{display:flex!important;width:18px;height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important}
+#dashboard .dashboard-department-chart .department-chart-columns>i{display:flex!important;width:18px;height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important;cursor:pointer}
 #dashboard .dashboard-department-chart .department-chart-columns>i>b{display:block;margin-bottom:8px;color:#262626;font-size:14px;line-height:22px;font-weight:600}
-#dashboard .dashboard-department-chart .department-chart-columns>i>em{display:block;width:100%!important;height:0;border-radius:4px 4px 0 0;background:var(--department-column-color)!important;transition:height .25s ease}
-#dashboard .dashboard-department-chart .department-chart-columns>.department-video-column>em{opacity:.42}
+#dashboard .dashboard-department-chart .department-chart-columns>i>em{position:relative;display:block;width:100%!important;height:0;border-radius:4px 4px 0 0;background:var(--department-column-color)!important;transition:height .25s ease,filter .18s ease,opacity .18s ease}
+#dashboard .dashboard-department-chart .department-chart-columns>i>em:after{position:absolute;bottom:calc(100% + 12px);left:50%;z-index:5;min-width:148px;padding:10px 12px;border:1px solid #DBDCE0;border-radius:6px;background:#FFF;box-shadow:0 6px 18px rgba(38,38,38,.12);color:#262626;content:attr(data-tooltip);font-size:13px;font-style:normal;line-height:20px;opacity:0;pointer-events:none;transform:translate(-50%,4px);transition:opacity .18s ease,transform .18s ease;white-space:pre}
+#dashboard .dashboard-department-chart .department-chart-columns>i:hover>em{filter:brightness(.92)}
+#dashboard .dashboard-department-chart .department-chart-columns>i:hover>em:after{opacity:1;transform:translate(-50%,0)}
+#dashboard .dashboard-department-chart .department-chart-columns>.department-video-column>em{background:color-mix(in srgb,var(--department-column-color) 42%,transparent)!important}
+#dashboard .dashboard-department-chart .department-chart-columns>.department-video-column:hover>em{background:color-mix(in srgb,var(--department-column-color) 68%,transparent)!important}
 #dashboard .dashboard-department-chart .bar-list>div>span{order:1;overflow:hidden;max-width:100%;color:#262626!important;font-size:14px!important;line-height:20px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
 #dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;display:flex;min-height:40px;flex-direction:column;align-items:center;color:#585858;font-size:13px;line-height:20px;text-align:center}
 #dashboard .dashboard-department-chart .department-chart-share .department-share-rate{color:#2962FF;font-weight:600}
@@ -1187,10 +1191,11 @@ setInterval(()=>{
   put('dashboardDepartmentTotal',`${formatCount(imageTotal)} 张 / ${formatCount(videoTotal)} 条`);
   dashboard.querySelectorAll('.dashboard-department-chart .bar-list>div').forEach((row,index)=>{
    const images=imageAmounts[index]||0,videos=videoAmounts[index]||0;
-   [['.department-image-column',images],['.department-video-column',videos]].forEach(([selector,value])=>{
+   [['.department-image-column',images,'图片','张'],['.department-video-column',videos,'视频','条']].forEach(([selector,value,type,unit])=>{
     const column=row.querySelector(selector),number=column?.querySelector('b'),bar=column?.querySelector('em');
     if(number)number.textContent=formatCount(value);
-    if(bar){bar.style.width='100%';bar.style.height=value?`${Math.max(value/maximum*86,3.5)}%`:'0'}
+    if(bar){bar.style.width='100%';bar.style.height=value?`${Math.max(value/maximum*86,3.5)}%`:'0';bar.dataset.tooltip=`${departments[index]}\n${type}：${formatCount(value)} ${unit}\n需求占比：${formatRate(images+videos,departmentTotal)}`}
+    if(column)column.setAttribute('aria-label',`${departments[index]}${type} ${formatCount(value)} ${unit}，需求占比 ${formatRate(images+videos,departmentTotal)}`);
    });
    const share=row.querySelector('.department-chart-share');
    const shareRate=share?.querySelector('.department-share-rate'),shareDetail=share?.querySelector('.department-share-detail');
