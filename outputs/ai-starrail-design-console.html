@@ -1095,12 +1095,12 @@ setInterval(()=>{
    </div>
   </section>
   <section class="card dashboard-card dashboard-ai-card">
-   <div class="section-title"><div><h2>视频与 AI 视频数据</h2><p>按实际交付和设计复盘统计视频产出。</p></div><span class="dashboard-ai-source" id="dashboardAiVideoSource">流程实时同步</span></div>
+   <div class="section-title"><div><h2>AI视频产出</h2><p>同步设计复盘中的真实视频生成、采纳与素材复用数据。</p></div><span class="dashboard-ai-source" id="dashboardAiVideoSource">待录入复盘</span></div>
    <div class="dashboard-ai-metrics">
-    <div class="dashboard-ai-metric"><span>本月交付视频</span><b id="dashboardVideoDelivered">0 条</b></div>
-    <div class="dashboard-ai-metric material"><span>AI 生成视频</span><b id="dashboardAiVideoGenerated">0 条</b></div>
-    <div class="dashboard-ai-metric adopted"><span>AI 实际采纳</span><b id="dashboardAiVideoAdopted">0 条</b></div>
-    <div class="dashboard-ai-metric rate"><span>AI 视频采纳率</span><b id="dashboardAiVideoRate">0%</b></div>
+    <div class="dashboard-ai-metric"><span>AI生成视频</span><b id="dashboardAiVideoGenerated">0 条</b></div>
+    <div class="dashboard-ai-metric adopted"><span>实际采纳视频</span><b id="dashboardAiVideoAdopted">0 条</b></div>
+    <div class="dashboard-ai-metric rate"><span>视频采纳率</span><b id="dashboardAiVideoRate">0%</b></div>
+    <div class="dashboard-ai-metric material"><span>可复用提示词/素材</span><b id="dashboardAiVideoReusable">0 条</b></div>
    </div>
   </section>`;
  dashboard.insertBefore(overview,personalOutput);
@@ -1139,6 +1139,7 @@ setInterval(()=>{
  if(introduction)introduction.textContent='任务产出、部门分布、AI 生图与视频应用数据概览。';
  const dashboardMonthInput=document.getElementById('dashboardMonth');
  const dashboardMonthStorageKey='ai-visual-dashboard-month';
+ let dashboardMonthPickerOpen=false;
  if(dashboardMonthInput){
   const today=new Date();
   dashboardMonthInput.innerHTML=Array.from({length:24},(_,index)=>{
@@ -1148,7 +1149,10 @@ setInterval(()=>{
   let savedMonth='';
   try{savedMonth=localStorage.getItem(dashboardMonthStorageKey)||''}catch(_){}
   dashboardMonthInput.value=[...dashboardMonthInput.options].some(option=>option.value===savedMonth)?savedMonth:taskCenterCurrentMonth;
-  dashboardMonthInput.disabled=false;
+  dashboardMonthInput.removeAttribute('disabled');
+  Object.defineProperty(dashboardMonthInput,'disabled',{configurable:true,get(){return this.hasAttribute('disabled')},set(value){if(!value)this.removeAttribute('disabled')}});
+  dashboardMonthInput.addEventListener('focus',()=>{dashboardMonthPickerOpen=true});
+  dashboardMonthInput.addEventListener('blur',()=>{dashboardMonthPickerOpen=false});
  }
  const dashboardSelectedMonth=()=>dashboardMonthInput?.value||taskCenterCurrentMonth;
  const dashboardMonthTasks=month=>(sharedTasks||[]).filter(task=>{
@@ -1194,7 +1198,6 @@ setInterval(()=>{
    return Number.isFinite(deadline.getTime())&&deadline.getTime()<Date.now();
   });
   const overdueTotal=overdue.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
-  const videos=completed.filter(task=>task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
   put('dashTotal',formatCount(total));
   put('dashTodo',formatCount(waitingTotal));
   put('dashProgress',formatCount(inProgress.reduce((sum,task)=>sum+(Number(task.quantity)||0),0)));
@@ -1228,7 +1231,6 @@ setInterval(()=>{
    const share=row.querySelector('.department-chart-share');
    if(share)share.textContent=`图片 ${formatCount(images)} 张 · 视频 ${formatCount(videos)} 条`;
   });
-  put('dashboardVideoDelivered',`${formatCount(videos)} 条`);
   const completionLabel=dashboard.querySelector('.done-ring')?.parentElement?.querySelector(':scope > span');
   if(completionLabel)completionLabel.textContent=`完成率 ${formatRate(completedTotal,total)}`;
  };
@@ -1246,8 +1248,11 @@ setInterval(()=>{
   put('dashboardAiVideoGenerated',`${formatCount(videoGenerated)} 条`);
   put('dashboardAiVideoAdopted',`${formatCount(videoAdopted)} 条`);
   put('dashboardAiVideoRate',formatRate(videoAdopted,videoGenerated));
+  const videoReusable=String(video.reusable??'').trim();
+  put('dashboardAiVideoReusable',videoReusable?(/^\d+(?:\.\d+)?$/.test(videoReusable)?`${formatCount(videoReusable)} 条`:videoReusable):'0 条');
+  document.getElementById('dashboardAiVideoReusable').title=videoReusable;
   put('dashboardAiImageSource',Object.keys(image).length?'已同步设计复盘':'待录入复盘');
-  put('dashboardAiVideoSource',Object.keys(video).length?'流程 + AI 复盘':'流程实时同步');
+  put('dashboardAiVideoSource',Object.keys(video).length?'已同步设计复盘':'待录入复盘');
   updateTaskMetrics();
  };
  let aiLoading=false,lastAiLoad=0,lastAiMonth='';
@@ -1268,6 +1273,7 @@ setInterval(()=>{
   }
  };
  if(dashboardMonthInput)dashboardMonthInput.onchange=()=>{
+  dashboardMonthPickerOpen=false;
   if(!dashboardMonthInput.value)dashboardMonthInput.value=taskCenterCurrentMonth;
   try{localStorage.setItem(dashboardMonthStorageKey,dashboardMonthInput.value)}catch(_){}
   renderAiData({});
@@ -1281,6 +1287,7 @@ setInterval(()=>{
  };
  const refresh=refreshDashboardFromTasks;
  refreshDashboardFromTasks=async function(...args){
+  if(dashboard.classList.contains('active')&&dashboardMonthPickerOpen)return;
   try{return await refresh.apply(this,args)}finally{
    updateTaskMetrics();
    if(dashboard.classList.contains('active'))void loadAiData();
