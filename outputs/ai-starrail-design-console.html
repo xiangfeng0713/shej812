@@ -445,6 +445,14 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 /* 2026-08-24 指定区域二次调整：任务中心、优先级与部门纵向汇总 */
 #taskCenterPersonal .task-board-metrics{gap:10px!important;margin-bottom:10px!important}
 #taskCenterPersonal .task-board-metrics article>span{font-size:18px!important;line-height:27px!important;font-weight:700!important}
+#taskCenterPersonal .task-board-metrics article{position:relative;overflow:hidden;min-height:132px;padding:20px 22px!important;border:0!important;border-radius:10px!important;box-shadow:0 5px 14px rgba(38,38,38,.08);transition:transform .2s ease,box-shadow .2s ease,filter .2s ease}
+#taskCenterPersonal .task-board-metrics article:nth-child(1){background:linear-gradient(125deg,#FE585B 0%,#FF8173 100%)!important}
+#taskCenterPersonal .task-board-metrics article:nth-child(2){background:linear-gradient(125deg,#F29849 0%,#F6B66C 100%)!important}
+#taskCenterPersonal .task-board-metrics article:nth-child(3){background:linear-gradient(125deg,#35B188 0%,#61C8A3 100%)!important}
+#taskCenterPersonal .task-board-metrics article:nth-child(n)>span,#taskCenterPersonal .task-board-metrics article:nth-child(n)>b,#taskCenterPersonal .task-board-metrics article:nth-child(n)>small{color:#fff!important}
+#taskCenterPersonal .task-board-metrics article>small{opacity:.9}
+#taskCenterPersonal .task-board-metrics article:hover{transform:translateY(-3px);box-shadow:0 10px 22px rgba(38,38,38,.15);filter:brightness(1.035)}
+@media(prefers-reduced-motion:reduce){#taskCenterPersonal .task-board-metrics article{transition:none}#taskCenterPersonal .task-board-metrics article:hover{transform:none}}
 #taskCenterPersonal .task-board-card{padding:10px!important;margin-bottom:0!important}
 #taskCenterPersonal .task-board-tabs{gap:10px!important;padding-bottom:10px!important}
 #taskCenterPersonal .task-board-list{gap:10px!important;padding-top:10px!important}
