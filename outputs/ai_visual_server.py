@@ -270,6 +270,77 @@ def parse_review_ai_sheet(cells: dict[str, str]) -> dict:
     return result
 
 
+def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict[str, dict[str, dict[str, str]]]:
+    """Read month-based AI image/video exports without requiring the review template."""
+    sheets = parse_xlsx_cells(content)
+    results: dict[str, dict[str, dict[str, str]]] = {}
+
+    def normalize(value: str) -> str:
+        return re.sub(r"[\s_\-/（）()：:]+", "", str(value or "")).casefold()
+
+    def read_month(value: str) -> str:
+        text = str(value or "").strip()
+        match = re.search(r"(20\d{2})\s*[年/.\-]\s*(\d{1,2})", text)
+        if match and 1 <= int(match.group(2)) <= 12:
+            return f"{match.group(1)}-{int(match.group(2)):02d}"
+        if re.fullmatch(r"\d{5}(?:\.\d+)?", text):
+            return (datetime(1899, 12, 30) + timedelta(days=float(text))).strftime("%Y-%m")
+        return ""
+
+    def kind_for(value: str) -> str:
+        text = normalize(value)
+        if any(word in text for word in ("视频", "video")):
+            return "video"
+        if any(word in text for word in ("图片", "生图", "图像", "image")):
+            return "image"
+        return ""
+
+    for sheet_name, cells in sheets.items():
+        rows: dict[int, dict[str, str]] = {}
+        for reference, value in cells.items():
+            match = re.fullmatch(r"([A-Z]+)(\d+)", reference)
+            if match and value:
+                rows.setdefault(int(match.group(2)), {})[match.group(1)] = value
+        sheet_kind, sheet_month = kind_for(sheet_name), read_month(sheet_name)
+        for row_number, row in sorted(rows.items()):
+            headers = {column: normalize(value) for column, value in row.items()}
+            if not any(any(word in label for word in ("生成", "采纳", "采用", "复用", "提示词")) for label in headers.values()):
+                continue
+            for next_number in sorted(number for number in rows if number > row_number):
+                values = rows[next_number]
+                if any(normalize(value) in ("月份", "统计月份", "复盘月份") for value in values.values()):
+                    break
+                month = next((read_month(values.get(column, "")) for column, label in headers.items() if "月份" in label or label in ("日期", "时间")), "")
+                month = month or next((read_month(value) for value in values.values() if read_month(value)), "") or sheet_month or fallback_month
+                row_kind = next((kind_for(values.get(column, "")) for column, label in headers.items() if any(word in label for word in ("类型", "分类", "类别", "板块"))), "") or sheet_kind
+                for kind in ("image", "video"):
+                    parsed: dict[str, str] = {}
+                    for column, label in headers.items():
+                        if not values.get(column, ""):
+                            continue
+                        column_kind = kind_for(label)
+                        if column_kind and column_kind != kind or not column_kind and row_kind != kind:
+                            continue
+                        if "采纳率" in label or "采用率" in label:
+                            continue
+                        if "生成" in label or "产出" in label:
+                            parsed["generated"] = clean_metric_number(values[column])
+                        elif "采纳" in label or "采用" in label:
+                            parsed["adopted"] = clean_metric_number(values[column])
+                        elif any(word in label for word in ("复用", "提示词", "素材")):
+                            parsed["reusable"] = str(values[column]).strip()[:2000]
+                    if parsed:
+                        results.setdefault(month, {}).setdefault(kind, {}).update(parsed)
+            break
+        if sheet_name == "AI产出复盘" and not any(sheet_kind in data for data in results.values()):
+            imported = parse_review_ai_sheet(cells)
+            if imported:
+                results.setdefault(sheet_month or fallback_month, {}).update(imported)
+    if not results:
+        raise ValueError("未识别到 AI 产出数据，请在表格中设置月份、AI 生成图片/视频、实际采纳图片/视频及可复用提示词/素材字段。")
+    return results
+
+
 def parse_review_action_sheet(cells: dict[str, str]) -> dict:
     summary = cells.get("A9", "").strip()[:4000]
     actions = []
@@ -906,6 +977,41 @@ class Handler(SimpleHTTPRequestHandler):
             data["review_click_editor_ids"] = editor_ids
             write_data(data)
             self.send_json({"editor_ids": editor_ids, "can_edit": True, "can_manage": True})
+            return
+        if path == "/api/dashboard-ai-uploads":
+            data = read_data()
+            admin, data = self.require_admin(data)
+            if not admin:
+                return
+            parsed = self.read_review_upload()
+            if not parsed:
+                return
+            fields, uploaded = parsed
+            if not uploaded:
+                self.send_json({"error": "请选择 AI 产出 XLSX 数据表格。"}, HTTPStatus.BAD_REQUEST)
+                return
+            month = fields.get("month", "")
+            filename, content = uploaded
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请选择正确的统计月份。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if Path(filename).suffix.lower() != ".xlsx" or len(filename) > 120 or not content.startswith(b"PK"):
+                self.send_json({"error": "仅支持有效的 XLSX 多维数据表格。"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                imported = parse_dashboard_ai_workbook(content, month)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            settings = data.setdefault("review_settings", {})
+            stored = settings.setdefault("ai_data", {})
+            for imported_month, sections in imported.items():
+                for kind, values in sections.items():
+                    stored.setdefault(imported_month, {}).setdefault(kind, {}).update(values)
+            settings["updated_by"] = public_user(admin)
+            settings["updated_at"] = now()
+            write_data(data)
+            self.send_json({"months": sorted(imported), "sections": sum(len(sections) for sections in imported.values())}, HTTPStatus.CREATED)
             return
         if path == "/api/review-uploads":
             data = read_data()
