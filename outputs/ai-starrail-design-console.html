@@ -632,11 +632,7 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-department-chart .section-title{align-items:flex-start;margin-bottom:12px}
 #dashboard .department-chart-total{display:flex;align-items:center;gap:8px;color:#585858;font-size:13px;line-height:24px;white-space:nowrap}
 #dashboard .department-chart-total b{color:#2962FF;font-size:16px;line-height:24px;font-weight:600}
-#dashboard .department-chart-legend{display:flex;align-items:center;justify-content:center;gap:22px;flex-wrap:wrap;padding:6px 0 2px}
-#dashboard .department-chart-legend>span{display:inline-flex;align-items:center;gap:7px;color:#585858;font-size:13px;line-height:20px;white-space:nowrap}
-#dashboard .department-chart-legend>span>i{display:block;width:10px;height:10px;flex:none;border-radius:2px}
-#dashboard .department-chart-legend>.department-chart-legend-divider{width:1px;height:16px;background:#DBDCE0}
-#dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:10px 24px 0}
+#dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:16px 24px 0}
 #dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:54px;left:24px;height:1px;background:#DBDCE0;content:""}
 #dashboard .dashboard-department-chart .bar-list>div{position:relative;z-index:1;display:flex!important;min-width:0;min-height:286px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0;border:0;background:transparent}
 #dashboard .dashboard-department-chart .department-chart-columns{order:0;display:flex;align-items:flex-end;justify-content:center;gap:18px;height:232px}
@@ -645,7 +641,8 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-department-chart .department-chart-columns>i>em{display:block;width:100%!important;height:0;border-radius:4px 4px 0 0;background:var(--department-column-color)!important;transition:height .25s ease}
 #dashboard .dashboard-department-chart .department-chart-columns>.department-video-column>em{opacity:.42}
 #dashboard .dashboard-department-chart .bar-list>div>span{order:1;overflow:hidden;max-width:100%;color:#262626!important;font-size:14px!important;line-height:20px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
-#dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;color:#585858;font-size:13px;line-height:20px}
+#dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;display:flex;min-height:40px;flex-direction:column;align-items:center;color:#585858;font-size:13px;line-height:20px;text-align:center}
+#dashboard .dashboard-department-chart .department-chart-share .department-share-rate{color:#2962FF;font-weight:600}
 @media(max-width:760px){#dashboard .dashboard-department-chart .bar-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}#dashboard .dashboard-department-chart .bar-list:after{display:none}}
 #dashboard .dashboard-ai-source{color:#585858!important;font-size:13px!important;line-height:20px!important;font-weight:400!important}
 #dashboard .dashboard-ai-metric{border-color:#E7E8EA!important;background:#F8F9FD!important}
@@ -1115,26 +1112,6 @@ setInterval(()=>{
   total.className='department-chart-total';
   total.innerHTML='<span>本月总量</span><b id="dashboardDepartmentTotal">0</b>';
   departmentCard.querySelector('.section-title')?.appendChild(total);
-  if(departmentList){
-   const legend=document.createElement('div');
-   legend.className='department-chart-legend';
-   departmentColors.forEach(([name,color])=>{
-    const item=document.createElement('span'),marker=document.createElement('i');
-    marker.style.backgroundColor=color;
-    item.append(marker,document.createTextNode(name));
-    legend.appendChild(item);
-   });
-   const divider=document.createElement('span');
-   divider.className='department-chart-legend-divider';
-   legend.appendChild(divider);
-   [['图片','#585858'],['视频','#BEBEBE']].forEach(([name,color])=>{
-    const item=document.createElement('span'),marker=document.createElement('i');
-    marker.style.backgroundColor=color;
-    item.append(marker,document.createTextNode(name));
-    legend.appendChild(item);
-   });
-   departmentCard.insertBefore(legend,departmentList);
-  }
   departmentList?.querySelectorAll(':scope>div').forEach((row,index)=>{
    const amount=row.querySelector('b'),imageColumn=row.querySelector('i');
    if(amount&&imageColumn){
@@ -1150,7 +1127,7 @@ setInterval(()=>{
    }
    const share=document.createElement('small');
    share.className='department-chart-share';
-   share.textContent='图片 0 张 · 视频 0 条';
+   share.innerHTML='<span class="department-share-rate">需求占比 0%</span><span class="department-share-detail">图片 0 张 · 视频 0 条</span>';
    row.appendChild(share);
   });
   dashboard.insertBefore(departmentCard,overview);
@@ -1205,7 +1182,7 @@ setInterval(()=>{
   const departments=['国内电商','海外电商','产品市场','线下物料','软件私域'];
   const imageAmounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department&&task.type!=='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
   const videoAmounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department&&task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
-  const imageTotal=imageAmounts.reduce((sum,value)=>sum+value,0),videoTotal=videoAmounts.reduce((sum,value)=>sum+value,0);
+  const imageTotal=imageAmounts.reduce((sum,value)=>sum+value,0),videoTotal=videoAmounts.reduce((sum,value)=>sum+value,0),departmentTotal=imageTotal+videoTotal;
   const maximum=Math.max(...imageAmounts,...videoAmounts,1);
   put('dashboardDepartmentTotal',`${formatCount(imageTotal)} 张 / ${formatCount(videoTotal)} 条`);
   dashboard.querySelectorAll('.dashboard-department-chart .bar-list>div').forEach((row,index)=>{
@@ -1216,7 +1193,9 @@ setInterval(()=>{
     if(bar){bar.style.width='100%';bar.style.height=value?`${Math.max(value/maximum*86,3.5)}%`:'0'}
    });
    const share=row.querySelector('.department-chart-share');
-   if(share)share.textContent=`图片 ${formatCount(images)} 张 · 视频 ${formatCount(videos)} 条`;
+   const shareRate=share?.querySelector('.department-share-rate'),shareDetail=share?.querySelector('.department-share-detail');
+   if(shareRate)shareRate.textContent=`需求占比 ${formatRate(images+videos,departmentTotal)}`;
+   if(shareDetail)shareDetail.textContent=`图片 ${formatCount(images)} 张 · 视频 ${formatCount(videos)} 条`;
   });
   put('dashboardVideoDelivered',`${formatCount(videos)} 条`);
   const completionLabel=dashboard.querySelector('.done-ring')?.parentElement?.querySelector(':scope > span');
