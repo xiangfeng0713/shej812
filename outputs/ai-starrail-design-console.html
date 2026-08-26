@@ -1882,8 +1882,32 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
   try{page=localStorage.getItem(pageStorageKey)||page;}catch(_){}
   const pageButton=document.querySelector(`.nav button[data-page="${page}"]`);
   if(!pageButton||page==='request')return;
-  // 刷新只恢复一级页面：不再自动进入任务中心/数据看板的二级页，避免视觉跳转。
-  pageButton.click();
+  // 直接恢复一级页面，不触发点击事件，避免先显示需求提交再跳转的视觉抖动。
+  document.querySelector('.page.active')?.classList.remove('active');
+  document.getElementById(page)?.classList.add('active');
+  document.querySelectorAll('.nav button[data-page]').forEach(button=>button.classList.toggle('active',button===pageButton));
+  document.getElementById('title').textContent=pageButton.textContent.trim();
+  document.querySelector('.task-rail').hidden=true;
+  document.querySelector('.app').classList.add('task-center-hidden');
+  if(page==='taskboard'){
+   restoreTaskCenterSummarySections();
+   taskCenterPersonal.hidden=false;
+   taskCenterSummaryHost.hidden=true;
+   taskCenterMonthControl.hidden=false;
+   taskCenterHeading.textContent='任务中心';
+   taskCenterIntro.textContent='集中查看我的待办、已处理和已提交任务，点击任务可进入当前流程节点。';
+   taskCenterMenu.hidden=true;
+   taskCenterButton.setAttribute('aria-expanded','false');
+   applyTaskCenterMonthFilter();
+  }
+  if(page==='dashboard'){
+   const dashboard=document.getElementById('dashboard');
+   dashboard.classList.remove('dashboard-view-ai','dashboard-view-personal');
+   dashboard.classList.add('dashboard-view-overview');
+   document.querySelector('.dashboard-submenu').hidden=true;
+   document.querySelector('.nav button[data-page="dashboard"]')?.setAttribute('aria-expanded','false');
+   if(typeof refreshDashboardFromTasks==='function')refreshDashboardFromTasks();
+  }
  };
  const originalApplyCurrentUser=applyCurrentUser;
  applyCurrentUser=function(user){originalApplyCurrentUser(user);setTimeout(restoreLocation,0);};
@@ -1891,9 +1915,10 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
 
  // 首次加载只建立通知基线，不把历史任务误当成“刚到达”的新待办弹窗。
  let notificationBaselineReady=false;
+ const notificationMuteUntil=Date.now()+5000;
  const originalNotifyIncomingTasks=notifyIncomingTasks;
  notifyIncomingTasks=function(tasks){
-  if(!notificationBaselineReady){
+  if(!notificationBaselineReady||Date.now()<notificationMuteUntil){
    notificationBaselineReady=true;
    if(currentUser){
     const records=(tasks||[]).map(task=>task.id+'|'+task.stage+'|'+(task.updated_at||''));
