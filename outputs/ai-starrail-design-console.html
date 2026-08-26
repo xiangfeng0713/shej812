@@ -1871,31 +1871,39 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
  taskCenterMonthControl.hidden=false;
 
  const pageStorageKey='ai-visual-current-page-v2';
- const taskViewStorageKey='ai-visual-task-center-view-v2';
- const dashboardViewStorageKey='ai-visual-dashboard-view-v2';
  document.querySelectorAll('.nav button[data-page]').forEach(button=>button.addEventListener('click',()=>{
-  try{localStorage.setItem(pageStorageKey,button.dataset.page);if(button.dataset.page==='taskboard')localStorage.setItem(taskViewStorageKey,'personal');}catch(_){}
- }));
- taskCenterMenu.querySelectorAll('[data-task-center-view]').forEach(link=>link.addEventListener('click',()=>{
-  try{localStorage.setItem(pageStorageKey,'taskboard');localStorage.setItem(taskViewStorageKey,link.dataset.taskCenterView);}catch(_){}
- }));
- document.querySelectorAll('[data-dashboard-view]').forEach(link=>link.addEventListener('click',()=>{
-  try{localStorage.setItem(pageStorageKey,'dashboard');localStorage.setItem(dashboardViewStorageKey,link.dataset.dashboardView);}catch(_){}
+  try{localStorage.setItem(pageStorageKey,button.dataset.page);}catch(_){}
  }));
  let locationRestored=false;
  const restoreLocation=()=>{
   if(locationRestored||!currentUser)return;
   locationRestored=true;
-  let page='request',taskView='personal',dashboardView='overview';
-  try{page=localStorage.getItem(pageStorageKey)||page;taskView=localStorage.getItem(taskViewStorageKey)||taskView;dashboardView=localStorage.getItem(dashboardViewStorageKey)||dashboardView;}catch(_){}
+  let page='request';
+  try{page=localStorage.getItem(pageStorageKey)||page;}catch(_){}
   const pageButton=document.querySelector(`.nav button[data-page="${page}"]`);
   if(!pageButton||page==='request')return;
+  // 刷新只恢复一级页面：不再自动进入任务中心/数据看板的二级页，避免视觉跳转。
   pageButton.click();
-  if(page==='taskboard'&&taskView!=='personal')setTimeout(()=>taskCenterMenu.querySelector(`[data-task-center-view="${taskView}"]`)?.click(),0);
-  if(page==='dashboard'&&dashboardView!=='overview')setTimeout(()=>document.querySelector(`[data-dashboard-view="${dashboardView}"]`)?.click(),0);
  };
  const originalApplyCurrentUser=applyCurrentUser;
  applyCurrentUser=function(user){originalApplyCurrentUser(user);setTimeout(restoreLocation,0);};
  setTimeout(restoreLocation,0);
+
+ // 首次加载只建立通知基线，不把历史任务误当成“刚到达”的新待办弹窗。
+ let notificationBaselineReady=false;
+ const originalNotifyIncomingTasks=notifyIncomingTasks;
+ notifyIncomingTasks=function(tasks){
+  if(!notificationBaselineReady){
+   notificationBaselineReady=true;
+   if(currentUser){
+    const records=(tasks||[]).map(task=>task.id+'|'+task.stage+'|'+(task.updated_at||''));
+    try{localStorage.setItem('ai-visual-incoming-notices-'+currentUser.id,JSON.stringify(records.slice(-100)));}catch(_){}
+   }
+   document.getElementById('taskToast')?.classList.remove('show');
+   if(typeof stopBrowserAttention==='function')stopBrowserAttention();
+   return;
+  }
+  return originalNotifyIncomingTasks(tasks);
+ };
 })();
 </script></body></html>
