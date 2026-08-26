@@ -564,6 +564,8 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
             # Tolerate wrappers such as Markdown fences or log text around the
             # JSON object while still requiring a real records payload.
             start, end = raw_value.find("{"), raw_value.rfind("}")
+            if raw_value.startswith("[") and raw_value.rfind("]") > 0:
+                start, end = 0, raw_value.rfind("]")
             if start >= 0 and end > start:
                 try:
                     value = json.loads(raw_value[start : end + 1])
