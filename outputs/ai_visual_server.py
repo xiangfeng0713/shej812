@@ -553,10 +553,14 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
     # AirScript's documented response serializes data.result as a JSON string;
     # accept both that form and an already-decoded object for compatibility.
     if isinstance(value, str):
+        raw_value = value.strip()
         try:
-            value = json.loads(value)
+            value = json.loads(raw_value)
+            # Some AirScript versions JSON-encode the return value twice.
+            if isinstance(value, str):
+                value = json.loads(value)
         except json.JSONDecodeError as error:
-            raise ValueError("金山文档脚本返回格式不是有效 JSON，请检查脚本最后的 return。") from error
+            raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
     records = value.get("records", []) if isinstance(value, dict) else value
     if not isinstance(records, list):
         raise ValueError("金山文档脚本未返回记录，请复制并使用中台提供的读取脚本。")
