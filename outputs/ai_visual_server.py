@@ -312,8 +312,10 @@ def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict:
             headers = {column: normalize(value) for column, value in row.items()}
             has_name = any(label in ("姓名", "成员", "人员", "员工") or "姓名" in label for label in headers.values())
             has_role = any(label in ("岗位", "角色", "职位") or "岗位" in label for label in headers.values())
+            has_kind = any(any(word in label for word in ("类型", "分类", "类别", "板块")) for label in headers.values())
             has_ai = any(any(word in label for word in ("生成", "采纳", "采用", "复用", "提示词")) for label in headers.values())
-            if not (has_name and has_role and has_ai):
+            # 金山多维表格可只提供“姓名 + 类型”，岗位会回填为未设置岗位，仍可正常统计个人产出。
+            if not (has_name and has_ai and (has_role or has_kind)):
                 continue
             people_by_month: dict[str, dict[tuple[str, str], dict]] = {}
             for next_number in sorted(number for number in rows if number > row_number):
@@ -321,24 +323,24 @@ def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict:
                 if any(normalize(value) in ("月份", "统计月份", "复盘月份", "姓名", "成员", "人员") for value in values.values()):
                     break
                 name = next((str(values.get(column, "")).strip() for column, label in headers.items() if label in ("姓名", "成员", "人员", "员工") or "姓名" in label), "")
-                role = next((str(values.get(column, "")).strip() for column, label in headers.items() if label in ("岗位", "角色", "职位") or "岗位" in label), "")
+                role = next((str(values.get(column, "")).strip() for column, label in headers.items() if label in ("岗位", "角色", "职位") or "岗位" in label), "") or "未设置岗位"
                 if not name:
                     continue
                 month = next((read_month(values.get(column, "")) for column, label in headers.items() if "月份" in label or label in ("日期", "时间")), "")
                 month = month or sheet_month or fallback_month
-                person = {"name": name[:80], "role": role[:80], "image_generated": 0, "image_adopted": 0, "video_generated": 0, "video_adopted": 0, "reusable": 0}
+                row_kind = next((kind_for(values.get(column, "")) for column, label in headers.items() if any(word in label for word in ("类型", "分类", "类别", "板块"))), "") or sheet_kind
+                person = people_by_month.setdefault(month, {}).setdefault((name[:80], role[:80]), {"name": name[:80], "role": role[:80], "image_generated": 0, "image_adopted": 0, "video_generated": 0, "video_adopted": 0, "reusable": 0})
                 for column, label in headers.items():
                     value = values.get(column, "")
                     if not value:
                         continue
-                    is_video = "视频" in label or "video" in label
+                    is_video = row_kind == "video" or "视频" in label or "video" in label
                     if "生成" in label or "产出" in label:
-                        person["video_generated" if is_video else "image_generated"] = number(value)
+                        person["video_generated" if is_video else "image_generated"] += number(value)
                     elif "采纳" in label or "采用" in label:
-                        person["video_adopted" if is_video else "image_adopted"] = number(value)
+                        person["video_adopted" if is_video else "image_adopted"] += number(value)
                     elif any(word in label for word in ("复用", "提示词", "素材")):
-                        person["reusable"] = number(value)
-                people_by_month.setdefault(month, {})[(person["name"], person["role"])] = person
+                        person["reusable"] = max(person["reusable"], number(value))
             for month, people in people_by_month.items():
                 values = list(people.values())
                 results.setdefault(month, {})["people"] = values
@@ -449,9 +451,16 @@ def download_dashboard_ai_workbook(source_url: str) -> bytes:
 def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, dict[str, dict[str, str]]]:
     """Map authorized AirScript records into the existing monthly AI metrics."""
     result: dict[str, dict[str, dict[str, str]]] = {}
+    people_by_month: dict[str, dict[tuple[str, str], dict]] = {}
 
     def normalized(value: str) -> str:
         return re.sub(r"[\s_\-/（）()：:]+", "", str(value or "")).casefold()
+
+    def metric(value: object) -> float:
+        try:
+            return float(clean_metric_number(str(value)) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     for record in records[:5000]:
         if not isinstance(record, dict):
@@ -461,6 +470,8 @@ def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, 
         match = re.search(r"(20\d{2})\s*[年/.\-]\s*(\d{1,2})", raw_month)
         month = f"{match.group(1)}-{int(match.group(2)):02d}" if match and 1 <= int(match.group(2)) <= 12 else fallback_month
         row_hint = normalized(str(record.get("__sheet", "")) + " " + str(next((value for key, value in fields.items() if key in ("类型", "分类", "类别", "板块", "type")), "")))
+        name = str(next((value for key, value in fields.items() if key in ("姓名", "成员", "人员", "员工", "文本") or "姓名" in key), "")).strip()
+        role = str(next((value for key, value in fields.items() if key in ("岗位", "角色", "职位") or "岗位" in key), "未设置岗位")).strip() or "未设置岗位"
         for kind, hints in (("image", ("图片", "生图", "图像", "image")), ("video", ("视频", "video"))):
             section: dict[str, str] = {}
             for key, value in fields.items():
@@ -477,6 +488,16 @@ def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, 
                     section["reusable"] = str(value).strip()[:2000]
             if section:
                 result.setdefault(month, {}).setdefault(kind, {}).update(section)
+                if name:
+                    person = people_by_month.setdefault(month, {}).setdefault((name[:80], role[:80]), {
+                        "name": name[:80], "role": role[:80], "image_generated": 0,
+                        "image_adopted": 0, "video_generated": 0, "video_adopted": 0, "reusable": 0,
+                    })
+                    person[f"{kind}_generated"] += metric(section.get("generated", 0))
+                    person[f"{kind}_adopted"] += metric(section.get("adopted", 0))
+                    person["reusable"] = max(person["reusable"], metric(section.get("reusable", 0)))
+    for month, people in people_by_month.items():
+        result.setdefault(month, {})["people"] = list(people.values())
     if not result:
         raise ValueError("金山文档授权成功，但未识别到月份、AI 生成图片/视频、实际采纳或可复用素材字段。")
     return result
@@ -1190,6 +1211,11 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
+            account_roles = {str(user.get("name", "")).strip(): str(user.get("tag", "")).strip() for user in active_users(data)}
+            for sections in imported.values():
+                for person in sections.get("people", []):
+                    if person.get("role") == "未设置岗位":
+                        person["role"] = account_roles.get(str(person.get("name", "")).strip(), "未设置岗位") or "未设置岗位"
             settings = data.setdefault("review_settings", {})
             if webhook:
                 settings["ai_connector"] = {"webhook": webhook, "token": script_token, "updated_at": now()}
