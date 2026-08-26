@@ -560,7 +560,16 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
             if isinstance(value, str):
                 value = json.loads(value)
         except json.JSONDecodeError as error:
-            raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
+            # Tolerate wrappers such as Markdown fences or log text around the
+            # JSON object while still requiring a real records payload.
+            start, end = raw_value.find("{"), raw_value.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    value = json.loads(raw_value[start : end + 1])
+                except json.JSONDecodeError:
+                    raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
+            else:
+                raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
     records = value.get("records", []) if isinstance(value, dict) else value
     if not isinstance(records, list):
         raise ValueError("金山文档脚本未返回记录，请复制并使用中台提供的读取脚本。")
