@@ -668,6 +668,11 @@ class Handler(SimpleHTTPRequestHandler):
         print(f"[{self.log_date_time_string()}] {fmt % args}")
 
     def end_headers(self):
+        # The console is a single HTML application: never let browsers reuse an older script after a refresh.
+        if self.path.endswith(".html") or self.path == "/":
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
