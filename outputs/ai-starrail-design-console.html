@@ -928,24 +928,40 @@ const taskSummaryStage=task=>task?.stage_label||task?.stage||task?.current_stage
 const taskSummaryOwner=task=>taskPersonName(task?.current_owner)||taskPersonName(task?.assignee)||taskPersonName(task?.design_owner)||taskPersonName(task?.approver)||taskPersonName(task?.submitter)||'未分配';
 const taskSummaryKey=task=>String(task?.id||`${task?.name||''}-${task?.created_at||''}`);
 const uniqueTasks=tasks=>[...new Map(tasks.filter(Boolean).map(task=>[taskSummaryKey(task),task])).values()];
-const taskDateMonth=value=>{const match=String(value||'').match(/^(\d{4})-(\d{2})/);return match?`${match[1]}-${match[2]}`:''};
+const taskDateKey=value=>{const match=String(value||'').trim().match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);return match?`${match[1]}-${String(match[2]).padStart(2,'0')}-${String(match[3]).padStart(2,'0')}`:''};
+const taskDateMonth=value=>taskDateKey(value).slice(0,7);
+const taskTodayKey=()=>{const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`};
 const taskIsCompleted=task=>taskSummaryStage(task)==='验收完结'||taskSummaryStage(task)==='已完成'||task?.status==='completed';
-const taskCompletionMonth=task=>{const history=[...(task?.history||[])].reverse(),event=history.find(item=>item?.action==='acceptance_pass'||item?.to_stage==='验收完结');return taskDateMonth(event?.at||task?.completed_at||task?.finished_at||task?.updated_at||task?.final_delivery_date)};
-const taskSubmissionMonth=task=>taskDateMonth(task?.created_at||task?.submitted_at||task?.submit_date||task?.updated_at);
+const taskCompletionDate=task=>{const history=[...(task?.history||[])].reverse(),event=history.find(item=>item?.action==='acceptance_pass'||item?.to_stage==='验收完结');return taskDateKey(event?.at||task?.completed_at||task?.finished_at||task?.updated_at||task?.final_delivery_date)};
+const taskCompletionMonth=task=>taskCompletionDate(task).slice(0,7);
+const taskSubmissionDate=task=>taskDateKey(task?.created_at||task?.submitted_at||task?.submit_date||task?.updated_at);
+const taskSubmissionMonth=task=>taskSubmissionDate(task).slice(0,7);
+function taskMatchesPeriod(task,month,day=''){
+ const submitted=taskSubmissionDate(task),completed=taskCompletionDate(task);
+ if(!submitted)return false;
+ if(day){
+  if(day<submitted||day>taskTodayKey())return false;
+  return !taskIsCompleted(task)||!completed||day<=completed;
+ }
+ const submittedMonth=submitted.slice(0,7);
+ if(month<submittedMonth||month>taskCenterCurrentMonth)return false;
+ return !taskIsCompleted(task)||!completed||month<=completed.slice(0,7);
+}
+function taskAtPeriod(task,month,day=''){
+ const currentKey=day||month,isDay=!!day,completion=isDay?taskCompletionDate(task):taskCompletionMonth(task),today=taskTodayKey();
+ if((isDay&&currentKey===today)||(!isDay&&month===taskCenterCurrentMonth)||taskIsCompleted(task)&&completion===currentKey)return task;
+ const history=task?.history||[],eventKey=event=>isDay?taskDateKey(event?.at):taskDateMonth(event?.at),past=history.filter(event=>{const recorded=eventKey(event);return recorded&&recorded<=currentKey}),latest=past[past.length-1],future=history.find(event=>{const recorded=eventKey(event);return recorded&&recorded>currentKey});
+ const stage=latest?.to_stage||future?.from_stage||'部门负责人审批';
+ return {...task,stage,stage_label:stage,current_stage:stage,current_stage_label:stage,status:'in_progress'};
+}
 function taskMatchesSelectedMonth(task){
  const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
- const submitted=taskSubmissionMonth(task);
- if(!submitted||selected<submitted||selected>taskCenterCurrentMonth)return false;
- if(!taskIsCompleted(task))return true;
- const completed=taskCompletionMonth(task);
- return !completed?selected===submitted:selected<=completed;
+ const selectedDay=taskCenterMonthInput.dataset.selectedDate||'';
+ return taskMatchesPeriod(task,selected,selectedDay);
 }
 function taskAtSelectedMonth(task){
  const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
- if(selected===taskCenterCurrentMonth||taskIsCompleted(task)&&taskCompletionMonth(task)===selected)return task;
- const history=task?.history||[],past=history.filter(event=>{const month=taskDateMonth(event?.at);return month&&month<=selected}),latest=past[past.length-1],future=history.find(event=>{const month=taskDateMonth(event?.at);return month&&month>selected});
- const stage=latest?.to_stage||future?.from_stage||'部门负责人审批';
- return {...task,stage,stage_label:stage,current_stage:stage,current_stage_label:stage,status:'in_progress'};
+ return taskAtPeriod(task,selected,taskCenterMonthInput.dataset.selectedDate||'');
 }
 function taskCenterFilteredTasks(){return (sharedTasks||[]).filter(taskMatchesSelectedMonth).map(taskAtSelectedMonth)}
 function taskSummaryStatus(task){
@@ -995,8 +1011,9 @@ function applyTaskCenterMonthFilter(){
  if(typeof renderLiveDashboard==='function')renderLiveDashboard(tasks);
  if(typeof renderTypeDashboards==='function')renderTypeDashboards(tasks);
  const selected=taskCenterMonthInput.value||taskCenterCurrentMonth;
- const completed=tasks.filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===selected),sum=list=>list.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
- const periodLabel=selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
+ const selectedDay=taskCenterMonthInput.dataset.selectedDate||'';
+ const completed=(sharedTasks||[]).filter(task=>taskIsCompleted(task)&&(selectedDay?taskCompletionDate(task)===selectedDay:taskCompletionMonth(task)===selected)),sum=list=>list.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
+ const periodLabel=selectedDay?`${Number(selectedDay.slice(5,7))}月${Number(selectedDay.slice(8,10))}日`:selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
  const designOutput=sum(completed.filter(task=>task.type!=='视频'&&task.type!=='图片拍摄'));
  const videoOutput=sum(completed.filter(task=>task.type==='视频'));
  const shootOutput=sum(completed.filter(task=>task.type==='图片拍摄'));
@@ -1118,11 +1135,12 @@ setInterval(()=>{
 <script id="v2-completed-month-output-20260825">
 (()=>{
  const updateCompletedMonthlyOutput=()=>{
-  const inTaskCenter=document.getElementById('taskboard')?.classList.contains('active')&&!taskCenterMonthControl.hidden;
-  const selected=inTaskCenter?(taskCenterMonthInput.value||taskCenterCurrentMonth):taskCenterCurrentMonth;
-  const completed=(sharedTasks||[]).filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===selected);
-  const sum=tasks=>tasks.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
-  const period=selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
+ const inTaskCenter=document.getElementById('taskboard')?.classList.contains('active')&&!taskCenterMonthControl.hidden;
+ const selected=inTaskCenter?(taskCenterMonthInput.value||taskCenterCurrentMonth):taskCenterCurrentMonth;
+ const selectedDay=inTaskCenter?(taskCenterMonthInput.dataset.selectedDate||''):'';
+ const completed=(sharedTasks||[]).filter(task=>taskIsCompleted(task)&&(selectedDay?taskCompletionDate(task)===selectedDay:taskCompletionMonth(task)===selected));
+ const sum=tasks=>tasks.reduce((total,task)=>total+(Number(task?.quantity)||0),0);
+ const period=selectedDay?`${Number(selectedDay.slice(5,7))}月${Number(selectedDay.slice(8,10))}日`:selected===taskCenterCurrentMonth?'本月':`${selected.slice(0,4)}年${Number(selected.slice(5,7))}月`;
   const design=document.getElementById('dashboardTaskTotal');
   const video=document.getElementById('typePeriod');
   if(design)design.textContent=`${period}产出 ${sum(completed.filter(task=>task.type!=='视频'&&task.type!=='图片拍摄'))} 张`;
@@ -1275,18 +1293,8 @@ setInterval(()=>{
   dashboardMonthInput.addEventListener('blur',()=>{dashboardMonthPickerOpen=false});
  }
  const dashboardSelectedMonth=()=>dashboardMonthInput?.value||taskCenterCurrentMonth;
- const dashboardMonthTasks=month=>(sharedTasks||[]).filter(task=>{
-  const submitted=taskSubmissionMonth(task);
-  if(month>taskCenterCurrentMonth||submitted&&month<submitted)return false;
-  if(!taskIsCompleted(task))return true;
-  const completed=taskCompletionMonth(task);
-  return completed?month<=completed:month===(submitted||taskCenterCurrentMonth);
- }).map(task=>{
-  if(month===taskCenterCurrentMonth||taskIsCompleted(task)&&taskCompletionMonth(task)===month)return task;
-  const history=task?.history||[],past=history.filter(event=>{const recorded=taskDateMonth(event?.at);return recorded&&recorded<=month}),latest=past[past.length-1],future=history.find(event=>{const recorded=taskDateMonth(event?.at);return recorded&&recorded>month});
-  const stage=latest?.to_stage||future?.from_stage||'部门负责人审批';
-  return {...task,stage,stage_label:stage,current_stage:stage,current_stage_label:stage,status:'in_progress'};
- });
+ const dashboardSelectedDate=()=>dashboardMonthInput?.dataset.selectedDate||'';
+ const dashboardMonthTasks=month=>{const day=dashboardSelectedDate();return (sharedTasks||[]).filter(task=>taskMatchesPeriod(task,month,day)).map(task=>taskAtPeriod(task,month,day))};
  const metricNumber=value=>{
   const number=Number.parseFloat(String(value??'').replace(/[^\d.-]/g,''));
   return Number.isFinite(number)&&number>=0?number:0;
@@ -1296,19 +1304,20 @@ setInterval(()=>{
  const put=(id,value)=>{const element=document.getElementById(id);if(element)element.textContent=value;};
  const updateTaskMetrics=()=>{
   const currentMonth=dashboardSelectedMonth();
-  const monthlyTasks=dashboardMonthTasks(currentMonth);
+  const selectedDay=dashboardSelectedDate(),monthlyTasks=dashboardMonthTasks(currentMonth);
   if(dashboardMonthInput)dashboardMonthInput.disabled=false;
   const period=dashboard.querySelector('.dashboard-period>span');
   if(period)period.textContent='查看日期选择';
   if(dashboard.classList.contains('active')&&typeof renderLiveDashboard==='function')renderLiveDashboard(monthlyTasks);
-  put('outputMonth',`${currentMonth.slice(0,4)} 年 ${Number(currentMonth.slice(5,7))} 月`);
-  const completed=monthlyTasks.filter(task=>taskIsCompleted(task)&&taskCompletionMonth(task)===currentMonth);
+  put('outputMonth',selectedDay?`${selectedDay.slice(0,4)} 年 ${Number(selectedDay.slice(5,7))} 月 ${Number(selectedDay.slice(8,10))} 日`:`${currentMonth.slice(0,4)} 年 ${Number(currentMonth.slice(5,7))} 月`);
+  const periodSubmitted=(sharedTasks||[]).filter(task=>selectedDay?taskSubmissionDate(task)===selectedDay:taskSubmissionMonth(task)===currentMonth);
+  const completed=(sharedTasks||[]).filter(task=>taskIsCompleted(task)&&(selectedDay?taskCompletionDate(task)===selectedDay:taskCompletionMonth(task)===currentMonth));
   const waiting=monthlyTasks.filter(task=>!taskIsCompleted(task));
-  const total=monthlyTasks.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
+  const total=periodSubmitted.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
   const completedTotal=completed.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
   const waitingTotal=waiting.reduce((sum,task)=>sum+(Number(task.quantity)||0),0);
   const inProgress=monthlyTasks.filter(task=>['设计需求分配','需求校对','需求校队','需求交付','初稿审核'].includes(task.stage));
-  const delivered=monthlyTasks.filter(task=>taskIsCompleted(task)||task.stage==='需求方验收 / 评分');
+  const delivered=completed;
   const overdue=waiting.filter(task=>{
    const date=String(task.delivery_date||task.expected_delivery_date||task.due_date||'').trim();
    if(!date)return false;
@@ -1323,6 +1332,8 @@ setInterval(()=>{
   put('dashProgress',formatCount(inProgress.reduce((sum,task)=>sum+(Number(task.quantity)||0),0)));
   put('dashDelivered',formatCount(delivered.reduce((sum,task)=>sum+(Number(task.quantity)||0),0)));
   put('dashOverdue',formatCount(overdueTotal));
+  const demandTitle=dashboard.querySelector('.metric-demand>span');
+  if(demandTitle)demandTitle.textContent=selectedDay?'当天需求产量':'本月需求产量';
   const overdueCaption=dashboard.querySelector('.overdue-metric>small');
   if(overdueCaption)overdueCaption.textContent=overdue.length?`${overdue.length} 项任务需优先处理`:'暂无逾期任务';
   [['.todo-ring',waitingTotal],['.done-ring',completedTotal],['.risk-ring',overdueTotal]].forEach(([selector,value])=>{
@@ -1333,12 +1344,12 @@ setInterval(()=>{
    ring.style.setProperty('--dashboard-ring-stop',`${Math.min(100,total?value/total*100:0)}%`);
   });
   const departments=['国内电商','海外电商','产品市场','线下物料','软件私域'];
-  const imageAmounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department&&task.type!=='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
-  const videoAmounts=departments.map(department=>monthlyTasks.filter(task=>task.department===department&&task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
+  const imageAmounts=departments.map(department=>periodSubmitted.filter(task=>task.department===department&&task.type!=='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
+  const videoAmounts=departments.map(department=>periodSubmitted.filter(task=>task.department===department&&task.type==='视频').reduce((sum,task)=>sum+(Number(task.quantity)||0),0));
   const imageTotal=imageAmounts.reduce((sum,value)=>sum+value,0),videoTotal=videoAmounts.reduce((sum,value)=>sum+value,0),departmentTotal=imageTotal+videoTotal;
   const maximum=Math.max(...imageAmounts,...videoAmounts,1);
   const departmentPeriod=dashboard.querySelector('.department-chart-total>span');
-  if(departmentPeriod)departmentPeriod.textContent=currentMonth===taskCenterCurrentMonth?'本月总量':`${Number(currentMonth.slice(5,7))}月总量`;
+  if(departmentPeriod)departmentPeriod.textContent=selectedDay?`${Number(selectedDay.slice(5,7))}月${Number(selectedDay.slice(8,10))}日总量`:currentMonth===taskCenterCurrentMonth?'本月总量':`${Number(currentMonth.slice(5,7))}月总量`;
   put('dashboardDepartmentTotal',`${formatCount(imageTotal)} 张 / ${formatCount(videoTotal)} 条`);
   dashboard.querySelectorAll('.dashboard-department-chart .bar-list>div').forEach((row,index)=>{
    const images=imageAmounts[index]||0,videos=videoAmounts[index]||0;
@@ -1481,9 +1492,10 @@ setInterval(()=>{
  };
  if(dashboardMonthInput)dashboardMonthInput.onchange=()=>{
   dashboardMonthPickerOpen=false;
-  if(!dashboardMonthInput.value)dashboardMonthInput.value=taskCenterCurrentMonth;
-  try{localStorage.setItem(dashboardMonthStorageKey,dashboardMonthInput.value)}catch(_){}
-  renderAiData({});
+ if(!dashboardMonthInput.value)dashboardMonthInput.value=taskCenterCurrentMonth;
+ try{localStorage.setItem(dashboardMonthStorageKey,dashboardMonthInput.value)}catch(_){}
+  updateTaskMetrics();
+ renderAiData({});
   void loadAiData(true);
  };
  const reviewRenderer=renderReviewImportedData;
@@ -1786,6 +1798,7 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
   const display=()=>{const base=parseMonth(source.value);trigger.innerHTML=`<span>${selectedDay&&monthValue(selectedDay)===monthValue(base)?`${selectedDay.getFullYear()}年${selectedDay.getMonth()+1}月${selectedDay.getDate()}日`:`${base.getFullYear()}年${base.getMonth()+1}月`}</span>${calendarIcon}`};
   const setSource=(date,day=null)=>{
    const value=monthValue(date);selectedDay=day;view=new Date(date.getFullYear(),date.getMonth(),1);
+   source.dataset.selectedDate=day?`${day.getFullYear()}-${pad(day.getMonth()+1)}-${pad(day.getDate())}`:'';
    if(source.tagName==='SELECT'&&!Array.from(source.options).some(option=>option.value===value)){source.add(new Option(`${date.getFullYear()} 年 ${date.getMonth()+1} 月`,value));}
    source.value=value;display();render();source.dispatchEvent(new Event('change',{bubbles:true}));
   };
