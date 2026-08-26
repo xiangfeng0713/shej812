@@ -509,8 +509,16 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
     hostname = (parsed.hostname or "").casefold()
     if parsed.scheme != "https" or not (hostname == "kdocs.cn" or hostname.endswith(".kdocs.cn")) or not re.fullmatch(r"/api/v3/ide/file/[^/]+/script/[^/]+/sync_task", parsed.path):
         raise ValueError("请填写金山文档脚本菜单中复制的官方 Webhook 链接。")
+    # AirScript tokens are ASCII header values.  Explicitly validate this so a
+    # copied full-width space/quote produces a useful form error instead of the
+    # opaque urllib "latin-1 codec can't encode characters" exception.
+    token = token.strip().replace("\u200b", "")
     if not token or len(token) > 512 or "\n" in token or "\r" in token:
         raise ValueError("请填写有效的金山文档 AirScript 脚本令牌。")
+    try:
+        token.encode("ascii")
+    except UnicodeEncodeError as error:
+        raise ValueError("AirScript 令牌含有非英文字符或全角空格，请从金山脚本令牌处重新复制。") from error
 
     class NoRedirectHandler(HTTPRedirectHandler):
         def redirect_request(self, request, response, code, message, headers, new_url):
@@ -534,7 +542,10 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
         suffix = f"（HTTP {error.code}{'：' + detail if detail else ''}）"
         raise ValueError("金山文档授权失败，请检查脚本令牌、Webhook 链接及文档共享权限" + suffix) from error
     except (URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ValueError("暂时无法连接金山文档，请检查网络和脚本返回数据。") from error
+        # Keep the user-facing message actionable: the previous generic text made
+        # network, TLS and malformed-script responses indistinguishable.
+        detail = str(error).strip()[:240]
+        raise ValueError("暂时无法连接金山文档，请检查网络和脚本返回数据。" + (f"（{detail}）" if detail else "")) from error
     if document.get("error") or document.get("status") not in (None, "finished", "success"):
         detail = document.get("message") or document.get("msg") or document.get("error") or ""
         raise ValueError("金山文档脚本执行失败，请确认已粘贴“多维表格读取脚本”并保存。" + (" 原因：" + str(detail)[:300] if detail else ""))
