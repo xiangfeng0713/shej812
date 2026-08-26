@@ -2111,4 +2111,39 @@ document.addEventListener('click',event=>{
     localStorage.setItem('ai-visual-current-location-v2',JSON.stringify({page,view:'overview'}));
   }catch(_){}
 },true);
+</script>
+<script>
+// 二级页被选中时只突出二级项；一级菜单仅用于模块总览，不与二级项同时高亮。
+document.addEventListener('click',event=>{
+  const taskLink=event.target.closest('[data-task-center-view]');
+  const dashboardLink=event.target.closest('[data-dashboard-view]');
+  if(!taskLink&&!dashboardLink)return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const page=taskLink?'taskboard':'dashboard';
+  const view=(taskLink||dashboardLink).dataset[taskLink?'taskCenterView':'dashboardView'];
+  document.querySelectorAll('.nav button[data-page]').forEach(item=>item.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(item=>item.classList.toggle('active',item.id===page));
+  document.querySelectorAll('[data-task-center-view],[data-dashboard-view]').forEach(item=>item.classList.toggle('active',item===(taskLink||dashboardLink)));
+  const taskMenu=document.querySelector('.task-center-submenu');
+  const dashboardMenu=document.querySelector('.dashboard-submenu');
+  if(taskMenu)taskMenu.hidden=!taskLink;
+  if(dashboardMenu)dashboardMenu.hidden=!dashboardLink;
+  if(taskLink&&typeof showTaskCenterView==='function')showTaskCenterView(view);
+  if(dashboardLink){
+    const dashboard=document.getElementById('dashboard');
+    dashboard?.classList.toggle('dashboard-view-ai',view==='ai');
+    dashboard?.classList.toggle('dashboard-view-personal',view==='personal');
+    dashboard?.classList.toggle('dashboard-view-overview',false);
+  }
+  const rail=document.querySelector('.task-rail');
+  if(rail)rail.hidden=true;
+  document.querySelector('.app')?.classList.add('task-center-hidden');
+  const heading=document.getElementById('title');
+  if(heading)heading.textContent=page==='taskboard'?'任务中心':'数据看板';
+  try{
+    localStorage.setItem('ai-visual-current-page-v2',page);
+    localStorage.setItem('ai-visual-current-location-v2',JSON.stringify({page,view}));
+  }catch(_){}
+},true);
 </script></body></html>
