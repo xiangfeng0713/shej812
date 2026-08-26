@@ -274,10 +274,10 @@ def parse_review_ai_sheet(cells: dict[str, str]) -> dict:
     return result
 
 
-def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict[str, dict[str, dict[str, str]]]:
+def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict:
     """Read month-based AI image/video exports without requiring the review template."""
     sheets = parse_xlsx_cells(content)
-    results: dict[str, dict[str, dict[str, str]]] = {}
+    results: dict[str, dict] = {}
 
     def normalize(value: str) -> str:
         return re.sub(r"[\s_\-/（）()：:]+", "", str(value or "")).casefold()
@@ -299,6 +299,57 @@ def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict[str
             return "image"
         return ""
 
+    def number(value: str) -> float:
+        cleaned = clean_metric_number(value)
+        try:
+            return float(cleaned or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def parse_people_sheet(rows: dict[int, dict[str, str]], sheet_month: str) -> None:
+        """Read one row per team member from an AI monthly output workbook."""
+        for row_number, row in sorted(rows.items()):
+            headers = {column: normalize(value) for column, value in row.items()}
+            has_name = any(label in ("姓名", "成员", "人员", "员工") or "姓名" in label for label in headers.values())
+            has_role = any(label in ("岗位", "角色", "职位") or "岗位" in label for label in headers.values())
+            has_ai = any(any(word in label for word in ("生成", "采纳", "采用", "复用", "提示词")) for label in headers.values())
+            if not (has_name and has_role and has_ai):
+                continue
+            people_by_month: dict[str, dict[tuple[str, str], dict]] = {}
+            for next_number in sorted(number for number in rows if number > row_number):
+                values = rows[next_number]
+                if any(normalize(value) in ("月份", "统计月份", "复盘月份", "姓名", "成员", "人员") for value in values.values()):
+                    break
+                name = next((str(values.get(column, "")).strip() for column, label in headers.items() if label in ("姓名", "成员", "人员", "员工") or "姓名" in label), "")
+                role = next((str(values.get(column, "")).strip() for column, label in headers.items() if label in ("岗位", "角色", "职位") or "岗位" in label), "")
+                if not name:
+                    continue
+                month = next((read_month(values.get(column, "")) for column, label in headers.items() if "月份" in label or label in ("日期", "时间")), "")
+                month = month or sheet_month or fallback_month
+                person = {"name": name[:80], "role": role[:80], "image_generated": 0, "image_adopted": 0, "video_generated": 0, "video_adopted": 0, "reusable": 0}
+                for column, label in headers.items():
+                    value = values.get(column, "")
+                    if not value:
+                        continue
+                    is_video = "视频" in label or "video" in label
+                    if "生成" in label or "产出" in label:
+                        person["video_generated" if is_video else "image_generated"] = number(value)
+                    elif "采纳" in label or "采用" in label:
+                        person["video_adopted" if is_video else "image_adopted"] = number(value)
+                    elif any(word in label for word in ("复用", "提示词", "素材")):
+                        person["reusable"] = number(value)
+                people_by_month.setdefault(month, {})[(person["name"], person["role"])] = person
+            for month, people in people_by_month.items():
+                values = list(people.values())
+                results.setdefault(month, {})["people"] = values
+                image = results[month].setdefault("image", {})
+                video = results[month].setdefault("video", {})
+                image.setdefault("generated", sum(person["image_generated"] for person in values))
+                image.setdefault("adopted", sum(person["image_adopted"] for person in values))
+                video.setdefault("generated", sum(person["video_generated"] for person in values))
+                video.setdefault("adopted", sum(person["video_adopted"] for person in values))
+            return
+
     for sheet_name, cells in sheets.items():
         rows: dict[int, dict[str, str]] = {}
         for reference, value in cells.items():
@@ -306,8 +357,17 @@ def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict[str
             if match and value:
                 rows.setdefault(int(match.group(2)), {})[match.group(1)] = value
         sheet_kind, sheet_month = kind_for(sheet_name), read_month(sheet_name)
+        parse_people_sheet(rows, sheet_month)
         for row_number, row in sorted(rows.items()):
             headers = {column: normalize(value) for column, value in row.items()}
+            is_people_header = (
+                any(label in ("姓名", "成员", "人员", "员工") or "姓名" in label for label in headers.values())
+                and any(label in ("岗位", "角色", "职位") or "岗位" in label for label in headers.values())
+            )
+            if is_people_header:
+                # Personal records have already been aggregated above.  Do not let
+                # the generic metric reader overwrite their totals with the last row.
+                continue
             if not any(any(word in label for word in ("生成", "采纳", "采用", "复用", "提示词")) for label in headers.values()):
                 continue
             for next_number in sorted(number for number in rows if number > row_number):
@@ -341,7 +401,7 @@ def parse_dashboard_ai_workbook(content: bytes, fallback_month: str) -> dict[str
             if imported:
                 results.setdefault(sheet_month or fallback_month, {}).update(imported)
     if not results:
-        raise ValueError("未识别到 AI 产出数据，请在表格中设置月份、AI 生成图片/视频、实际采纳图片/视频及可复用提示词/素材字段。")
+        raise ValueError("未识别到 AI 产出数据。请使用包含“月份、姓名、岗位、AI生图生成数、AI生图采纳数、AI视频生成数、AI视频采纳数、可复用提示词/素材”的 XLSX 表格。")
     return results
 
 
@@ -1136,7 +1196,11 @@ class Handler(SimpleHTTPRequestHandler):
             stored = settings.setdefault("ai_data", {})
             for imported_month, sections in imported.items():
                 for kind, values in sections.items():
-                    stored.setdefault(imported_month, {}).setdefault(kind, {}).update(values)
+                    if kind == "people":
+                        # A workbook represents the complete personnel snapshot for a month.
+                        stored.setdefault(imported_month, {})["people"] = values
+                    else:
+                        stored.setdefault(imported_month, {}).setdefault(kind, {}).update(values)
             settings["updated_by"] = public_user(admin)
             settings["updated_at"] = now()
             write_data(data)

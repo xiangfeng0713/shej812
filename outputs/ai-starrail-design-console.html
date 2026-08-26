@@ -1528,6 +1528,71 @@ setInterval(()=>{
  renderAiData({});
 })();
 </script>
+<style id="v2-dashboard-ai-person-output-20260826-style">
+#dashboard .dashboard-ai-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#dashboard .dashboard-ai-import-card,#dashboard .dashboard-ai-people{grid-column:1/-1}
+#dashboard .dashboard-ai-import-card{padding:18px 20px;background:#fff;border:1px solid #E2E7F0;border-radius:10px;box-shadow:0 3px 12px rgba(32,57,91,.05)}
+#dashboard .dashboard-ai-import-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
+#dashboard .dashboard-ai-import-top h2{margin:0;color:#202938;font-size:18px;line-height:26px}
+#dashboard .dashboard-ai-import-top p{margin:3px 0 0;color:#6B7280;font-size:13px;line-height:20px}
+#dashboard .dashboard-ai-import-actions{display:flex;gap:8px;flex:none}
+#dashboard .dashboard-ai-import-button{height:32px;padding:0 14px;border-radius:6px;border:1px solid #2962FF;background:#2962FF;color:#fff;font-size:13px;line-height:30px;box-shadow:none}
+#dashboard .dashboard-ai-import-button.secondary-import{background:#fff;border-color:#B9C9EA;color:#2962FF}
+#dashboard .dashboard-ai-import-guide{margin-top:10px;padding:8px 10px;border-radius:6px;background:#F5F8FF;color:#60708B;font-size:12px;line-height:18px}
+#dashboard .dashboard-ai-link-form{display:flex;gap:8px;margin-top:10px}
+#dashboard .dashboard-ai-link-input{height:34px;min-width:0;flex:1;padding:0 10px;border:1px solid #C9D5E8;border-radius:6px;color:#202938;font-size:13px;background:#fff}
+#dashboard .dashboard-ai-card{min-height:205px;background:#fff;border-color:#E2E7F0}
+#dashboard .dashboard-ai-card .section-title h2,#dashboard .dashboard-ai-people .section-title h2{font-size:18px;color:#202938}
+#dashboard .dashboard-ai-card .section-title p,#dashboard .dashboard-ai-people .section-title p{color:#6B7280;font-size:13px}
+#dashboard .dashboard-ai-source{color:#6B7280;font-size:12px}
+#dashboard .dashboard-ai-metrics{gap:8px}
+#dashboard .dashboard-ai-metric{min-height:72px;padding:12px;border:1px solid #E7ECF4;border-radius:8px;background:#F8FAFD}
+#dashboard .dashboard-ai-metric span{color:#6B7280;font-size:12px}
+#dashboard .dashboard-ai-metric b{display:block;margin-top:6px;color:#2962FF;font-size:22px;line-height:26px}
+#dashboard .dashboard-ai-metric.adopted b{color:#35B188}#dashboard .dashboard-ai-metric.rate b{color:#7B47DF}#dashboard .dashboard-ai-metric.material b{color:#F29849}
+#dashboard .dashboard-ai-people{padding:20px;background:#fff;border:1px solid #E2E7F0;border-radius:10px;box-shadow:0 3px 12px rgba(32,57,91,.05)}
+#dashboard .dashboard-ai-person-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+#dashboard .dashboard-ai-role{min-height:170px;padding:14px;border:1px solid #E7ECF4;border-radius:8px;background:#F8FAFD}
+#dashboard .dashboard-ai-role h3{margin:0 0 10px;color:#202938;font-size:15px;line-height:22px}
+#dashboard .dashboard-ai-person-row{display:grid;grid-template-columns:minmax(74px,1fr) repeat(5,auto);gap:8px;align-items:center;padding:9px 0;border-top:1px solid #E7ECF4;color:#4B5563;font-size:12px;line-height:18px}
+#dashboard .dashboard-ai-person-row:first-of-type{border-top:0}.dashboard-ai-person-name{color:#202938;font-weight:600;font-size:13px}.dashboard-ai-person-row b{color:#2962FF;font-weight:600}.dashboard-ai-person-row em{font-style:normal;color:#8A97A8}
+#dashboard .dashboard-ai-empty{margin:28px 0;color:#9AA6B7;font-size:13px;text-align:center}
+@media(max-width:900px){#dashboard .dashboard-ai-person-grid{grid-template-columns:1fr}#dashboard .dashboard-ai-import-top{align-items:flex-start;flex-direction:column}#dashboard .dashboard-ai-link-form{flex-wrap:wrap}}
+</style>
+<script id="v2-dashboard-ai-person-output-20260826">
+(()=>{
+ const dashboard=document.getElementById('dashboard');
+ const grid=dashboard?.querySelector('.dashboard-ai-grid');
+ if(!dashboard||!grid)return;
+ grid.innerHTML=`
+ <section class="dashboard-ai-import-card">
+   <div class="dashboard-ai-import-top"><div><h2>AI 月度产出数据</h2><p id="dashboardAiImportMessage">按月份导入 AI 产出明细，自动汇总团队与个人数据。</p></div><div class="dashboard-ai-import-actions"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkButton" type="button">导入 XLSX 链接</button><button class="dashboard-ai-import-button" id="dashboardAiImportButton" type="button">上传 XLSX 表格</button></div></div>
+   <div class="dashboard-ai-import-guide">表头需包含：月份、姓名、岗位、AI生图生成数、AI生图采纳数、AI视频生成数、AI视频采纳数、可复用提示词/素材。公开链接必须是可直接下载的 XLSX 链接；普通金山文档分享页无法被服务器读取。</div>
+   <div class="dashboard-ai-link-form" id="dashboardAiLinkForm" hidden><input class="dashboard-ai-link-input" id="dashboardAiImportLink" type="url" placeholder="粘贴公开 XLSX 下载或导出链接"><button class="dashboard-ai-import-button secondary-import" id="dashboardAiImportLinkCancel" type="button">取消</button><button class="dashboard-ai-import-button" id="dashboardAiImportLinkSubmit" type="button">读取并同步</button></div><input id="dashboardAiImportFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+ </section>
+ <section class="card dashboard-card dashboard-ai-card"><div class="section-title"><div><h2>AI生图产出</h2><p>按月份汇总团队图片生成、采纳与复用数据。</p></div><span class="dashboard-ai-source" id="dashboardAiImageSource">待导入数据</span></div><div class="dashboard-ai-metrics"><div class="dashboard-ai-metric"><span>AI 生成图片</span><b id="dashboardAiImageGenerated">0 张</b></div><div class="dashboard-ai-metric adopted"><span>实际采纳图片</span><b id="dashboardAiImageAdopted">0 张</b></div><div class="dashboard-ai-metric rate"><span>图片采纳率</span><b id="dashboardAiImageRate">0%</b></div><div class="dashboard-ai-metric material"><span>可复用提示词 / 素材</span><b id="dashboardAiImageReusable">0 条</b></div></div></section>
+ <section class="card dashboard-card dashboard-ai-card"><div class="section-title"><div><h2>AI视频产出</h2><p>按月份汇总团队视频生成、采纳与复用数据。</p></div><span class="dashboard-ai-source" id="dashboardAiVideoSource">待导入数据</span></div><div class="dashboard-ai-metrics"><div class="dashboard-ai-metric"><span>AI生成视频</span><b id="dashboardAiVideoGenerated">0 条</b></div><div class="dashboard-ai-metric adopted"><span>实际采纳视频</span><b id="dashboardAiVideoAdopted">0 条</b></div><div class="dashboard-ai-metric rate"><span>视频采纳率</span><b id="dashboardAiVideoRate">0%</b></div><div class="dashboard-ai-metric material"><span>可复用提示词 / 素材</span><b id="dashboardAiVideoReusable">0 条</b></div></div></section>
+ <section class="dashboard-ai-people"><div class="section-title"><div><h2>团队成员 AI 月度产出</h2><p>按岗位查看设计师、摄影师与剪辑师的 AI 生图／视频实际产出。</p></div><span class="dashboard-ai-source" id="dashboardAiPeopleSource">待导入数据</span></div><div class="dashboard-ai-person-grid" id="dashboardAiPeopleGrid"></div></section>`;
+ const byId=id=>document.getElementById(id),month=()=>byId('dashboardMonth')?.value||new Date().toISOString().slice(0,7);
+ const number=value=>{const parsed=Number.parseFloat(String(value??'').replace(/[^\d.-]/g,''));return Number.isFinite(parsed)&&parsed>=0?parsed:0};
+ const format=value=>new Intl.NumberFormat('zh-CN',{maximumFractionDigits:1}).format(number(value));
+ const set=(id,value)=>{const node=byId(id);if(node)node.textContent=value};
+ const setTotals=data=>{const ai=data?.ai_data||{},image=ai.image||{},video=ai.video||{};const ig=number(image.generated),ia=number(image.adopted),vg=number(video.generated),va=number(video.adopted);const rate=(a,g)=>g?`${format(a/g*100)}%`:'0%';set('dashboardAiImageGenerated',`${format(ig)} 张`);set('dashboardAiImageAdopted',`${format(ia)} 张`);set('dashboardAiImageRate',rate(ia,ig));set('dashboardAiImageReusable',`${format(image.reusable)} 条`);set('dashboardAiVideoGenerated',`${format(vg)} 条`);set('dashboardAiVideoAdopted',`${format(va)} 条`);set('dashboardAiVideoRate',rate(va,vg));set('dashboardAiVideoReusable',`${format(video.reusable)} 条`);set('dashboardAiImageSource',Object.keys(image).length?'已同步月度数据':'待导入数据');set('dashboardAiVideoSource',Object.keys(video).length?'已同步月度数据':'待导入数据')};
+ const renderPeople=people=>{const host=byId('dashboardAiPeopleGrid');if(!host)return;const groups=[['设计师',person=>!/摄影|剪辑/.test(person.role||'')],['摄影师',person=>/摄影/.test(person.role||'')],['剪辑师',person=>/剪辑/.test(person.role||'')]];host.replaceChildren(...groups.map(([title,test])=>{const section=document.createElement('section');section.className='dashboard-ai-role';const heading=document.createElement('h3');heading.textContent=title;section.append(heading);const rows=(Array.isArray(people)?people:[]).filter(test);if(!rows.length){const empty=document.createElement('p');empty.className='dashboard-ai-empty';empty.textContent='暂无已导入成员数据';section.append(empty);return section;}rows.forEach(person=>{const row=document.createElement('div');row.className='dashboard-ai-person-row';const fields=[[person.name,'dashboard-ai-person-name'],[`生图 ${format(person.image_generated)}`,''],[`图采纳 ${format(person.image_adopted)}`,''],[`视频 ${format(person.video_generated)}`,''],[`视频采纳 ${format(person.video_adopted)}`,''],[`复用 ${format(person.reusable)}`,'']];fields.forEach(([value,className],index)=>{const node=document.createElement(index?'em':'span');node.textContent=value;if(className)node.className=className;row.append(node)});section.append(row)});return section}))};
+ const sync=async()=>{try{const response=await fetch(`/api/review-settings?month=${encodeURIComponent(month())}`,{credentials:'same-origin'});if(!response.ok)throw new Error();const data=await response.json();setTotals(data);renderPeople(data?.ai_data?.people||[]);set('dashboardAiPeopleSource',Array.isArray(data?.ai_data?.people)&&data.ai_data.people.length?'已同步人员明细':'待导入人员明细')}catch(_){set('dashboardAiPeopleSource','AI 数据待录入')}};
+ const message=byId('dashboardAiImportMessage'),file=byId('dashboardAiImportFile'),linkForm=byId('dashboardAiLinkForm'),link=byId('dashboardAiImportLink');
+ const upload=async body=>{const buttons=[byId('dashboardAiImportButton'),byId('dashboardAiImportLinkButton'),byId('dashboardAiImportLinkSubmit')].filter(Boolean);buttons.forEach(button=>button.disabled=true);message.textContent='正在读取并同步 AI 月度产出数据……';try{const response=await fetch('/api/dashboard-ai-uploads',{method:'POST',body,credentials:'same-origin'});const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||'导入失败，请检查表格格式。');message.textContent=`已同步 ${result.months.length} 个月的数据，人员产出已按岗位归类。`;linkForm.hidden=true;link.value='';await sync()}catch(error){message.textContent=error.message||'导入失败，请检查文件与字段。'}finally{buttons.forEach(button=>button.disabled=false);file.value=''}};
+ byId('dashboardAiImportButton').onclick=()=>file.click();
+ byId('dashboardAiImportLinkButton').onclick=()=>{linkForm.hidden=false;link.focus()};
+ byId('dashboardAiImportLinkCancel').onclick=()=>{linkForm.hidden=true;link.value=''};
+ byId('dashboardAiImportLinkSubmit').onclick=()=>{const value=link.value.trim();if(!/^https:\/\//i.test(value)){message.textContent='请填写公开可访问的 HTTPS XLSX 下载链接。';link.focus();return}const body=new FormData();body.append('month',month());body.append('link',value);void upload(body)};
+ link.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();byId('dashboardAiImportLinkSubmit').click()}});
+ file.onchange=()=>{const selected=file.files?.[0];if(!selected)return;if(selected.size>5*1024*1024){message.textContent='AI 月度产出表格不能超过 5 MB。';file.value='';return}const body=new FormData();body.append('month',month());body.append('file',selected);void upload(body)};
+ byId('dashboardMonth')?.addEventListener('change',()=>void sync());
+ document.querySelector('.nav button[data-page="dashboard"]')?.addEventListener('click',()=>void sync());
+ sync();
+})();
+</script>
 <script id="v2-global-status-tags-20260824">
 (()=>{
  const statusTones=new Map([
