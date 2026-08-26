@@ -2021,6 +2021,26 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
  authMessageObserver.observe(authMessage,{childList:true,characterData:true,subtree:true});
  const originalOpenTaskAtCurrentStage=openTaskAtCurrentStage;
  openTaskAtCurrentStage=function(...args){saveLocation('request','overview');return originalOpenTaskAtCurrentStage.apply(this,args);};
+ // 所有一级导航只允许一个激活项；不能再用“.nav .active”这种会误选二级菜单的选择器。
+ document.querySelectorAll('.nav button[data-page]').forEach(button=>{
+  button.onclick=()=>{
+   const page=button.dataset.page;
+   if(page==='request'){
+    document.getElementById('backToDashboard').hidden=true;
+    if(activeTask)startNewRequest();
+   }
+   if((page==='dashboard'||page==='taskboard')&&currentUser)refreshDashboardFromTasks();
+   if(page==='review'&&currentUser){loadReviewUploads();loadImageReviewTargets();loadVideoReviewTargets();loadReviewCases();}
+   document.querySelectorAll('.nav button[data-page]').forEach(item=>item.classList.toggle('active',item===button));
+   document.querySelectorAll('.page').forEach(item=>item.classList.toggle('active',item.id===page));
+   if(page!=='taskboard')document.querySelector('.task-center-submenu').hidden=true;
+   if(page!=='dashboard')document.querySelector('.dashboard-submenu').hidden=true;
+   taskRail.hidden=true;
+   document.querySelector('.app').classList.add('task-center-hidden');
+   title.textContent=labels[page];
+   saveLocation(page,'overview');
+  };
+ });
 
  // 首次加载只建立通知基线，不把历史任务误当成“刚到达”的新待办弹窗。
  let notificationBaselineReady=false;
@@ -2051,4 +2071,44 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
   };
  }
 })();
+</script>
+<script>
+// 一级导航统一入口：只允许一个页面与一个图标处于激活状态，并立即记录刷新恢复位置。
+document.addEventListener('click',event=>{
+  const button=event.target.closest('.nav button[data-page]');
+  if(!button)return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const page=button.dataset.page;
+  const labels={request:'需求提交',taskboard:'任务中心',dashboard:'数据看板',inspiration:'创意灵感',review:'设计复盘',account:'账号管理'};
+  if(page==='request'&&typeof activeTask!=='undefined'&&activeTask&&typeof startNewRequest==='function')startNewRequest();
+  if((page==='dashboard'||page==='taskboard')&&typeof currentUser!=='undefined'&&currentUser&&typeof refreshDashboardFromTasks==='function')refreshDashboardFromTasks();
+  if(page==='review'&&typeof currentUser!=='undefined'&&currentUser){
+    if(typeof loadReviewUploads==='function')loadReviewUploads();
+    if(typeof loadImageReviewTargets==='function')loadImageReviewTargets();
+    if(typeof loadVideoReviewTargets==='function')loadVideoReviewTargets();
+    if(typeof loadReviewCases==='function')loadReviewCases();
+  }
+  document.querySelectorAll('.nav button[data-page]').forEach(item=>item.classList.toggle('active',item===button));
+  document.querySelectorAll('.page').forEach(item=>item.classList.toggle('active',item.id===page));
+  const taskMenu=document.querySelector('.task-center-submenu');
+  const dashboardMenu=document.querySelector('.dashboard-submenu');
+  if(taskMenu)taskMenu.hidden=page!=='taskboard';
+  if(dashboardMenu)dashboardMenu.hidden=page!=='dashboard';
+  if(page==='taskboard'&&typeof showTaskCenterView==='function')showTaskCenterView('personal');
+  if(page==='dashboard'){
+    const dashboard=document.getElementById('dashboard');
+    dashboard?.classList.remove('dashboard-view-ai','dashboard-view-personal');
+    dashboard?.classList.add('dashboard-view-overview');
+  }
+  const rail=document.querySelector('.task-rail');
+  if(rail)rail.hidden=true;
+  document.querySelector('.app')?.classList.add('task-center-hidden');
+  const heading=document.getElementById('title');
+  if(heading)heading.textContent=labels[page]||'';
+  try{
+    localStorage.setItem('ai-visual-current-page-v2',page);
+    localStorage.setItem('ai-visual-current-location-v2',JSON.stringify({page,view:'overview'}));
+  }catch(_){}
+},true);
 </script></body></html>
