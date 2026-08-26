@@ -550,6 +550,13 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
         detail = document.get("message") or document.get("msg") or document.get("error") or ""
         raise ValueError("金山文档脚本执行失败，请确认已粘贴“多维表格读取脚本”并保存。" + (" 原因：" + str(detail)[:300] if detail else ""))
     value = document.get("data", {}).get("result", document.get("result", []))
+    # AirScript's documented response serializes data.result as a JSON string;
+    # accept both that form and an already-decoded object for compatibility.
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ValueError("金山文档脚本返回格式不是有效 JSON，请检查脚本最后的 return。") from error
     records = value.get("records", []) if isinstance(value, dict) else value
     if not isinstance(records, list):
         raise ValueError("金山文档脚本未返回记录，请复制并使用中台提供的读取脚本。")
