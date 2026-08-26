@@ -1426,7 +1426,7 @@ setInterval(()=>{
  const aiWebhook=document.getElementById('dashboardAiWebhook');
  const aiToken=document.getElementById('dashboardAiToken');
  const aiAuthSubmit=document.getElementById('dashboardAiAuthSubmit');
- const airScriptSource=`function main() {\n  var records = [];\n  var sheets = Application.Sheets;\n  for (var sheetIndex = 1; sheetIndex <= sheets.Count; sheetIndex++) {\n    var sheet = sheets.Item(sheetIndex);\n    var fields = sheet.FieldDescriptors;\n    var range = sheet.Views(1).RecordRange;\n    for (var row = 1; row <= range.Count; row++) {\n      var record = { __sheet: sheet.Name };\n      for (var column = 1; column <= fields.Count; column++) {\n        var name = fields.Item(column).Name;\n        try { record[name] = range(row, "@" + name).Value; } catch (error) {}\n      }\n      records.push(record);\n    }\n  }\n  return { records: records };\n}\nmain();`;
+ const airScriptSource=`function main() {\n  // 金山“多维表格”读取脚本：不要使用普通 Excel 的 Application.Sheets。\n  var records = [];\n  var sheets = Application.Sheet.GetSheets();\n  for (var index = 0; index < sheets.length; index++) {\n    var sheet = sheets[index];\n    var result = Application.Record.GetRecords({ SheetId: sheet.id });\n    var rows = result && result.records ? result.records : [];\n    for (var row = 0; row < rows.length; row++) {\n      var fields = rows[row].fields || {};\n      fields.__sheet = sheet.name || sheet.Name || '';\n      records.push(fields);\n    }\n  }\n  return { records: records };\n}\nmain();`;
  const importAiData=async body=>{
   aiImportButton.disabled=true;
   aiImportLinkButton.disabled=true;
@@ -1597,7 +1597,7 @@ setInterval(()=>{
  byId('dashboardAiImportLinkSubmit').onclick=()=>{const value=link.value.trim();if(!/^https:\/\//i.test(value)){message.textContent='请填写公开可访问的 HTTPS XLSX 下载链接。';link.focus();return}const body=new FormData();body.append('month',month());body.append('link',value);void upload(body)};
  link.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();byId('dashboardAiImportLinkSubmit').click()}});
  const kdocsForm=byId('dashboardAiKdocsForm'),kdocsWebhook=byId('dashboardAiKdocsWebhook'),kdocsToken=byId('dashboardAiKdocsToken');
- const airScriptSource=`function main() {\n  var records = [];\n  var sheets = Application.Sheets;\n  for (var sheetIndex = 1; sheetIndex <= sheets.Count; sheetIndex++) {\n    var sheet = sheets.Item(sheetIndex);\n    var fields = sheet.FieldDescriptors;\n    var range = sheet.Views(1).RecordRange;\n    for (var row = 1; row <= range.Count; row++) {\n      var record = { __sheet: sheet.Name };\n      for (var column = 1; column <= fields.Count; column++) {\n        var name = fields.Item(column).Name;\n        try { record[name] = range(row, "@" + name).Value; } catch (error) {}\n      }\n      records.push(record);\n    }\n  }\n  return { records: records };\n}\nmain();`;
+  const airScriptSource=`function main() {\n  // 金山“多维表格”读取脚本（不是普通 Excel 脚本）\n  var records = [];\n  var sheets = Application.Sheet.GetSheets();\n  for (var index = 0; index < sheets.length; index++) {\n    var sheet = sheets[index];\n    var result = Application.Record.GetRecords({ SheetId: sheet.id });\n    var rows = result && result.records ? result.records : [];\n    for (var row = 0; row < rows.length; row++) {\n      var fields = rows[row].fields || {};\n      fields.__sheet = sheet.name || sheet.Name || '';\n      records.push(fields);\n    }\n  }\n  return { records: records };\n}\nmain();`;
  byId('dashboardAiKdocsButton').onclick=()=>{kdocsForm.hidden=false;linkForm.hidden=true;message.textContent='金山多维表格需要通过官方 AirScript 授权读取；普通分享链接无法直接读取。';kdocsWebhook.focus()};
  byId('dashboardAiKdocsCancel').onclick=()=>{kdocsForm.hidden=true;kdocsToken.value=''};
  byId('dashboardAiKdocsCopyScript').onclick=async()=>{try{await navigator.clipboard.writeText(airScriptSource);message.textContent='读取脚本已复制：在金山多维表格“脚本 → JS 脚本”中粘贴、保存并创建 Webhook。'}catch(_){message.textContent='脚本复制失败，请允许浏览器使用剪贴板后重试。'}};
@@ -2119,6 +2119,8 @@ document.addEventListener('click',event=>{
   document.querySelector('.app')?.classList.add('task-center-hidden');
   const heading=document.getElementById('title');
   if(heading)heading.textContent=labels[page]||'';
+  if(page==='dashboard')setTimeout(()=>window.playDashboardEntryMotion?.(),80);
+  if(page==='taskboard')setTimeout(()=>window.playTaskCenterEntryMotion?.(),80);
   try{
     localStorage.setItem('ai-visual-current-page-v2',page);
     localStorage.setItem('ai-visual-current-location-v2',JSON.stringify({page,view:'overview'}));
@@ -2154,6 +2156,8 @@ document.addEventListener('click',event=>{
   document.querySelector('.app')?.classList.add('task-center-hidden');
   const heading=document.getElementById('title');
   if(heading)heading.textContent=page==='taskboard'?'任务中心':'数据看板';
+  if(page==='dashboard')setTimeout(()=>window.playDashboardEntryMotion?.(),80);
+  if(page==='taskboard')setTimeout(()=>window.playTaskCenterEntryMotion?.(),80);
   try{
     localStorage.setItem('ai-visual-current-page-v2',page);
     localStorage.setItem('ai-visual-current-location-v2',JSON.stringify({page,view}));

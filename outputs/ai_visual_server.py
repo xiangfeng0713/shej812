@@ -525,11 +525,19 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
             raise ValueError("金山文档返回数据过大，请减少脚本读取范围。")
         document = json.loads(raw.decode("utf-8"))
     except HTTPError as error:
-        raise ValueError("金山文档授权失败，请检查脚本令牌、Webhook 链接及文档访问权限。") from error
+        try:
+            detail = error.read().decode("utf-8", "replace")[:500]
+            payload = json.loads(detail)
+            detail = str(payload.get("message") or payload.get("msg") or payload.get("error") or detail)
+        except Exception:
+            detail = ""
+        suffix = f"（HTTP {error.code}{'：' + detail if detail else ''}）"
+        raise ValueError("金山文档授权失败，请检查脚本令牌、Webhook 链接及文档共享权限" + suffix) from error
     except (URLError, TimeoutError, OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("暂时无法连接金山文档，请检查网络和脚本返回数据。") from error
     if document.get("error") or document.get("status") not in (None, "finished", "success"):
-        raise ValueError("金山文档脚本执行失败，请检查读取脚本是否已正确保存。")
+        detail = document.get("message") or document.get("msg") or document.get("error") or ""
+        raise ValueError("金山文档脚本执行失败，请确认已粘贴“多维表格读取脚本”并保存。" + (" 原因：" + str(detail)[:300] if detail else ""))
     value = document.get("data", {}).get("result", document.get("result", []))
     records = value.get("records", []) if isinstance(value, dict) else value
     if not isinstance(records, list):
