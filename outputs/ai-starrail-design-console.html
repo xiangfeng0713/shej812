@@ -1825,4 +1825,77 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
  initialize();setTimeout(initialize,0);
  document.addEventListener('click',()=>closeAll());document.addEventListener('keydown',event=>{if(event.key==='Escape')closeAll()});
 })();
+</script>
+<script id="v2-task-center-period-and-location-20260826">
+(()=>{
+ const visibleList=kind=>(taskCenterLists[kind]||[]).filter(taskMatchesSelectedMonth).map(taskAtSelectedMonth);
+ window.taskCenterVisibleList=visibleList;
+
+ showTaskPanel=function(kind){
+  document.querySelectorAll('.task-tabs button').forEach(button=>button.classList.toggle('active',button.dataset.task===kind));
+  const records=visibleList(kind),container=document.getElementById('taskRecords');
+  if(!container)return;
+  container.innerHTML=records.length?records.map(task=>taskRecordHtml(task,kind)).join(''):`<div class="empty-personnel">${kind==='todo'?'暂无待办':kind==='done'?'暂无已处理任务':'暂无已提交任务'}</div>`;
+ };
+ renderTaskBoardPage=function(kind=document.querySelector('[data-board-task].active')?.dataset.boardTask||'todo'){
+  const records=visibleList(kind),container=document.getElementById('taskBoardRecords');
+  if(!container)return;
+  document.querySelectorAll('[data-board-task]').forEach(button=>button.classList.toggle('active',button.dataset.boardTask===kind));
+  document.getElementById('taskBoardTodoCount').textContent=visibleList('todo').length;
+  document.getElementById('taskBoardDoneCount').textContent=visibleList('done').length;
+  document.getElementById('taskBoardSubmittedCount').textContent=visibleList('submitted').length;
+  container.innerHTML=records.length?records.map(task=>taskBoardRecordHtml(task,kind)).join(''):`<div class="task-board-empty">${kind==='todo'?'暂无待办任务':kind==='done'?'暂无已处理任务':'暂无已提交任务'}</div>`;
+ };
+ const refreshPersonal=()=>{
+  const todo=visibleList('todo'),done=visibleList('done'),submitted=visibleList('submitted');
+  const railTodo=document.querySelector('[data-task="todo"] em'),railDone=document.querySelector('[data-task="done"]'),railSubmitted=document.querySelector('[data-task="submitted"]');
+  if(railTodo)railTodo.textContent=todo.length;
+  if(railDone)railDone.textContent=`已处理 ${done.length}`;
+  if(railSubmitted)railSubmitted.textContent=`已提交 ${submitted.length}`;
+  showTaskPanel(document.querySelector('.task-tabs button.active')?.dataset.task||'todo');
+  renderTaskBoardPage(document.querySelector('[data-board-task].active')?.dataset.boardTask||'todo');
+ };
+ window.refreshTaskCenterPersonal=refreshPersonal;
+
+ const originalRenderTaskCenter=renderTaskCenter;
+ renderTaskCenter=function(...args){originalRenderTaskCenter(...args);refreshPersonal();};
+ const originalApplyTaskCenterMonthFilter=applyTaskCenterMonthFilter;
+ applyTaskCenterMonthFilter=function(){originalApplyTaskCenterMonthFilter();refreshPersonal();};
+ window.applyTaskCenterMonthFilter=applyTaskCenterMonthFilter;
+ const originalShowTaskCenterView=showTaskCenterView;
+ showTaskCenterView=function(view='personal'){
+  originalShowTaskCenterView(view);
+  taskCenterMonthControl.hidden=false;
+  applyTaskCenterMonthFilter();
+ };
+ taskCenterMonthControl.hidden=false;
+
+ const pageStorageKey='ai-visual-current-page-v2';
+ const taskViewStorageKey='ai-visual-task-center-view-v2';
+ const dashboardViewStorageKey='ai-visual-dashboard-view-v2';
+ document.querySelectorAll('.nav button[data-page]').forEach(button=>button.addEventListener('click',()=>{
+  try{localStorage.setItem(pageStorageKey,button.dataset.page);if(button.dataset.page==='taskboard')localStorage.setItem(taskViewStorageKey,'personal');}catch(_){}
+ }));
+ taskCenterMenu.querySelectorAll('[data-task-center-view]').forEach(link=>link.addEventListener('click',()=>{
+  try{localStorage.setItem(pageStorageKey,'taskboard');localStorage.setItem(taskViewStorageKey,link.dataset.taskCenterView);}catch(_){}
+ }));
+ document.querySelectorAll('[data-dashboard-view]').forEach(link=>link.addEventListener('click',()=>{
+  try{localStorage.setItem(pageStorageKey,'dashboard');localStorage.setItem(dashboardViewStorageKey,link.dataset.dashboardView);}catch(_){}
+ }));
+ let locationRestored=false;
+ const restoreLocation=()=>{
+  if(locationRestored||!currentUser)return;
+  locationRestored=true;
+  let page='request',taskView='personal',dashboardView='overview';
+  try{page=localStorage.getItem(pageStorageKey)||page;taskView=localStorage.getItem(taskViewStorageKey)||taskView;dashboardView=localStorage.getItem(dashboardViewStorageKey)||dashboardView;}catch(_){}
+  const pageButton=document.querySelector(`.nav button[data-page="${page}"]`);
+  if(!pageButton||page==='request')return;
+  pageButton.click();
+  if(page==='taskboard'&&taskView!=='personal')setTimeout(()=>taskCenterMenu.querySelector(`[data-task-center-view="${taskView}"]`)?.click(),0);
+  if(page==='dashboard'&&dashboardView!=='overview')setTimeout(()=>document.querySelector(`[data-dashboard-view="${dashboardView}"]`)?.click(),0);
+ };
+ const originalApplyCurrentUser=applyCurrentUser;
+ applyCurrentUser=function(user){originalApplyCurrentUser(user);setTimeout(restoreLocation,0);};
+ setTimeout(restoreLocation,0);
+})();
 </script></body></html>
