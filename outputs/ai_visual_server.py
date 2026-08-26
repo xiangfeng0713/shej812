@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import hashlib
 import ipaddress
@@ -567,7 +568,16 @@ def fetch_dashboard_airs_data(webhook: str, token: str, month: str) -> dict[str,
                 try:
                     value = json.loads(raw_value[start : end + 1])
                 except json.JSONDecodeError:
-                    raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
+                    # A few AirScript runtimes stringify objects using JS
+                    # object-literal notation (single quotes/unquoted keys).
+                    # Parse that safe, data-only representation as a fallback.
+                    candidate = raw_value[start : end + 1]
+                    candidate = re.sub(r"([{,])\s*([A-Za-z_$][\w$]*)\s*:", r"\1 '\2':", candidate)
+                    candidate = re.sub(r"\bundefined\b", "None", candidate)
+                    try:
+                        value = ast.literal_eval(candidate)
+                    except (ValueError, SyntaxError):
+                        raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
             else:
                 raise ValueError("金山文档脚本返回格式不是有效 JSON，请把脚本最后一行改为：return JSON.stringify({ records: records });") from error
     records = value.get("records", []) if isinstance(value, dict) else value
