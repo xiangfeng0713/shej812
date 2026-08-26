@@ -1986,9 +1986,11 @@ window.playTaskCenterEntryMotion=playTaskCenterMotion;
   locationRestored=true;
   let location={page:'request',view:'overview'};
   try{
-   const saved=JSON.parse(localStorage.getItem(locationStorageKey)||'null');
+   const sameSession=sessionStorage.getItem('ai-visual-session-started-v2')==='1';
+   const saved=sameSession?JSON.parse(localStorage.getItem(locationStorageKey)||'null'):null;
    if(saved?.page)location={...location,...saved};
-   else location.page=localStorage.getItem(pageStorageKey)||location.page;
+   else if(sameSession)location.page=localStorage.getItem(pageStorageKey)||location.page;
+   sessionStorage.setItem('ai-visual-session-started-v2','1');
   }catch(_){}
   const {page,view}=location;
   const pageButton=document.querySelector(`.nav button[data-page="${page}"]`);
