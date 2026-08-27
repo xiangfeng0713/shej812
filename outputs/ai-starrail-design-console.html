@@ -2209,7 +2209,7 @@ document.getElementById('logoutButton')?.addEventListener('click',()=>sessionSto
 #dashboard .dashboard-ai-role:nth-child(2) .dashboard-ai-bar-item:nth-child(3) .dashboard-ai-bar{background:linear-gradient(180deg,#F5D36A,#C79A20)}
 </style>
 <style>
-#dashboard .dashboard-ai-bar-tooltip{display:none!important;position:absolute;left:calc(100% + 14px);top:50%;bottom:auto;width:210px;padding:14px 16px;border:0;border-radius:14px;background:#fff;box-shadow:0 14px 30px rgba(32,57,91,.18);color:#334155;font-size:12px;line-height:21px;text-align:left;transform:translateY(-50%);pointer-events:none;z-index:5}
+#dashboard .dashboard-ai-bar-tooltip{display:none!important;position:fixed!important;left:0;top:0;bottom:auto;width:210px;padding:14px 16px;border:0;border-radius:14px;background:#fff;box-shadow:0 14px 30px rgba(32,57,91,.18);color:#334155;font-size:12px;line-height:21px;text-align:left;transform:none!important;pointer-events:none;z-index:9999}
 #dashboard .dashboard-ai-bar-item:hover .dashboard-ai-bar-tooltip{display:block!important}
 #dashboard .dashboard-ai-bar-tooltip:before{content:"";position:absolute;left:-9px;top:50%;margin-top:-9px;border-width:9px 9px 9px 0;border-style:solid;border-color:transparent #fff transparent transparent}
 #dashboard .dashboard-ai-bar-tooltip b{display:block;margin-bottom:6px;color:#1F2937;font-size:14px}
