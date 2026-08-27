@@ -2191,7 +2191,7 @@ document.querySelectorAll('.dashboard-ai-card h2').forEach((heading,index)=>{if(
  const sync=async()=>{try{const r=await fetch('/api/dashboard-ai-sync?month='+encodeURIComponent(month.value),{credentials:'same-origin'}),d=await r.json();if(r.ok){draw(d.ai_data?.people||[]);setTimeout(horizontalize,0)}}catch(_){}};month.addEventListener('change',sync);sync();setInterval(()=>{sync();month.dispatchEvent(new Event('change'))},60000);
  // The legacy review-settings loader may finish later; re-apply the two-column
  // grouping if it replaces our content with the old three-role layout.
- new MutationObserver(()=>{if(host.children.length!==2||!host.querySelector('.dashboard-ai-chart'))sync()}).observe(host,{childList:true});
+ new MutationObserver(()=>{if(host.querySelector('.dashboard-ai-person-row'))sync()}).observe(host,{childList:true});
 })();
 document.getElementById('logoutButton')?.addEventListener('click',()=>sessionStorage.removeItem('ai-visual-session-started-v2'));
 // Reuse the saved connector on every visit; only the server keeps the token.
