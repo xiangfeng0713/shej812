@@ -30,6 +30,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT.parent / "work" / "ai-visual-shared-data.json"
+SESSION_FILE = ROOT.parent / "work" / "ai-visual-sessions.json"
 REVIEW_UPLOAD_DIR = ROOT.parent / "work" / "review-imports"
 REVIEW_CASE_IMAGE_DIR = ROOT.parent / "work" / "review-case-images"
 SESSIONS: dict[str, tuple[str, float]] = {}
@@ -87,8 +88,30 @@ def now() -> str:
 
 def create_session(user_id: str) -> str:
     token = secrets.token_urlsafe(32)
-    SESSIONS[token] = (user_id, time.time() + SESSION_TTL_SECONDS)
+    expires = time.time() + SESSION_TTL_SECONDS
+    SESSIONS[token] = (user_id, expires)
+    try:
+        SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        saved = json.loads(SESSION_FILE.read_text(encoding="utf-8")) if SESSION_FILE.exists() else {}
+        saved[token] = {"user_id": user_id, "expires": expires}
+        SESSION_FILE.write_text(json.dumps(saved), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
     return token
+
+
+def load_persisted_session(token: str) -> tuple[str, float] | None:
+    try:
+        saved = json.loads(SESSION_FILE.read_text(encoding="utf-8")) if SESSION_FILE.exists() else {}
+        item = saved.get(token)
+        if isinstance(item, dict):
+            session = (str(item.get("user_id", "")), float(item.get("expires", 0)))
+            if session[0] and session[1] > time.time():
+                SESSIONS[token] = session
+                return session
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
 
 
 def login_is_allowed(client_ip: str) -> bool:
@@ -930,6 +953,8 @@ class Handler(SimpleHTTPRequestHandler):
         cookie = SimpleCookie(self.headers.get("Cookie"))
         token = cookie.get("ai_visual_session")
         session = SESSIONS.get(token.value) if token else None
+        if not session and token:
+            session = load_persisted_session(token.value)
         if not session:
             return None
         user_id, expires_at = session
