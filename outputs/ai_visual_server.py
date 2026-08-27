@@ -511,7 +511,11 @@ def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, 
                 elif any(word in key for word in ("复用", "提示词", "素材", "reusable")):
                     section["reusable"] = str(value).strip()[:2000]
             if section:
-                result.setdefault(month, {}).setdefault(kind, {}).update(section)
+                totals = result.setdefault(month, {}).setdefault(kind, {})
+                totals["generated"] = metric(totals.get("generated", 0)) + metric(section.get("generated", 0))
+                totals["adopted"] = metric(totals.get("adopted", 0)) + metric(section.get("adopted", 0))
+                if "reusable" in section:
+                    totals["reusable"] = metric(totals.get("reusable", 0)) + metric(section.get("reusable", 0))
                 if name:
                     person = people_by_month.setdefault(month, {}).setdefault((name[:80], role[:80]), {
                         "name": name[:80], "role": role[:80], "image_generated": 0,
