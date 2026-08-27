@@ -1082,6 +1082,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "video_actuals": video_actuals,
                     "video_notes": {"anomaly": str(video_notes.get("anomaly", "")), "improvement": str(video_notes.get("improvement", ""))},
                     "ai_data": ai_data if isinstance(ai_data, dict) else {},
+                    "ai_connector_webhook": str(settings.get("ai_connector", {}).get("webhook", "")),
                     "action_data": action_data if isinstance(action_data, dict) else {},
                 })
             return

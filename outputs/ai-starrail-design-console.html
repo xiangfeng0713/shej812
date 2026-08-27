@@ -2178,4 +2178,5 @@ document.addEventListener('click',event=>{
  select.addEventListener('change',load); load();
 })();
 document.querySelectorAll('.dashboard-ai-card h2').forEach((heading,index)=>{if(index===0)heading.textContent='团队AI生图产出';if(index===1)heading.textContent='团队AI视频产出'});
+document.getElementById('logoutButton')?.addEventListener('click',()=>sessionStorage.removeItem('ai-visual-session-started-v2'));
 </script></body></html>
