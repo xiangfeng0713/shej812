@@ -1524,7 +1524,7 @@ class Handler(SimpleHTTPRequestHandler):
             data["users"].append(user)
             write_data(data)
             token = create_session(user["id"])
-            self.send_json({"user": public_user(user)}, HTTPStatus.CREATED, f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/")
+            self.send_json({"user": public_user(user)}, HTTPStatus.CREATED, f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800")
             return
         if path == "/api/login":
             username = str(payload.get("username", "")).strip()
@@ -1544,7 +1544,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             LOGIN_ATTEMPTS.pop(login_key, None)
             token = create_session(user["id"])
-            self.send_json({"user": public_user(user)}, cookie=f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/")
+            self.send_json({"user": public_user(user)}, cookie=f"ai_visual_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800")
             return
         if path == "/api/logout":
             cookie = SimpleCookie(self.headers.get("Cookie"))
