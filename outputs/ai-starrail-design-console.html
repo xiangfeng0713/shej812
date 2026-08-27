@@ -2318,8 +2318,13 @@ document.getElementById('logoutButton')?.addEventListener('click',()=>sessionSto
  const progressColor=percent=>percent>=100?'#35B188':percent>=70?'#2962FF':percent>=30?'#F29849':'#FE585B';
  const roleOf=name=>{const user=(sharedUsers||[]).find(item=>String(item.name||'').trim()===String(name||'').trim());return user?.tag||'未设置岗位'};
  const render=()=>{
-  const rows=[...output.querySelectorAll(':scope>.output-row')];
-  if(!rows.length)return;
+ const rows=[...output.querySelectorAll(':scope>.output-row')];
+  if(!rows.length){
+   if(output.querySelector('.personal-output-list,.personal-output-empty'))return;
+   output.classList.add('personal-output-cards');
+   output.innerHTML='<div class="personal-output-empty">该月份暂无已分配任务数据</div>';
+   return;
+  }
   const records=rows.map(row=>{const cells=[...row.children].map(cell=>cell.textContent.trim());return{name:cells[0]||'未命名',assigned:cells[1]||'0',amount:cells[2]||'0',completed:cells[3]||'0',rate:cells[4]||'0%'}});
   output.classList.add('personal-output-cards');
   output.innerHTML='<div class="personal-output-list">'+records.map(person=>{const percent=Math.max(0,Math.min(100,Number.parseFloat(person.rate)||0)),accent=progressColor(percent);return `<article class="personal-output-card" style="--person-accent:${accent}"><header class="personal-output-card-head"><h3><b>${escapeHtml(person.name)}</b><i aria-hidden="true"></i><span>${escapeHtml(roleOf(person.name))}</span></h3><small>实时同步流程中的已分配任务与产出数量</small></header><div class="personal-output-card-body"><div class="personal-output-metrics"><div class="personal-output-metric"><span>已分配任务</span><b>${escapeHtml(person.assigned)}</b></div><div class="personal-output-metric"><span>产出数量（张/条/次）</span><b>${escapeHtml(person.amount)}</b></div><div class="personal-output-metric"><span>已完成</span><b>${escapeHtml(person.completed)}</b></div><div class="personal-output-metric"><span>完成率</span><b>${escapeHtml(person.rate)}</b></div></div><div class="personal-output-progress" aria-label="${escapeHtml(person.name)}完成率 ${escapeHtml(person.rate)}"><i style="width:${percent}%"></i></div></div></article>`}).join('')+'</div>';
