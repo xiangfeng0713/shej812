@@ -2105,6 +2105,8 @@ document.addEventListener('click',event=>{
     if(typeof loadReviewCases==='function')loadReviewCases();
   }
   document.querySelectorAll('.nav button[data-page]').forEach(item=>item.classList.toggle('active',item===button));
+  // 一级模块切换时清除上一次残留的二级高亮，避免出现“数据看板 + AI月度产出”同时亮起。
+  document.querySelectorAll('[data-task-center-view],[data-dashboard-view]').forEach(item=>item.classList.remove('active'));
   document.querySelectorAll('.page').forEach(item=>item.classList.toggle('active',item.id===page));
   const taskMenu=document.querySelector('.task-center-submenu');
   const dashboardMenu=document.querySelector('.dashboard-submenu');
