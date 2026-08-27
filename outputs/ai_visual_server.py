@@ -1167,6 +1167,31 @@ class Handler(SimpleHTTPRequestHandler):
             # is rendered. Keep them available while directory browsing remains off.
             super().do_GET()
             return
+        if path == "/api/dashboard-ai-sync":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            query = parse_qs(urlparse(self.path).query)
+            month = str(query.get("month", [datetime.now().strftime("%Y-%m")])[0])
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "统计月份格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            connector = data.get("review_settings", {}).get("ai_connector", {})
+            webhook, token = connector.get("webhook", ""), connector.get("token", "")
+            if not webhook or not token:
+                self.send_json({"error": "尚未配置金山多维表连接。"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                imported = fetch_dashboard_airs_data(webhook, token, month)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            settings = data.setdefault("review_settings", {})
+            stored = settings.setdefault("ai_data", {})
+            stored[month] = imported
+            write_data(data)
+            self.send_json({"month": month, "ai_data": imported})
+            return
         if path not in {"/", "/ai-starrail-design-console.html"}:
             self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
             return

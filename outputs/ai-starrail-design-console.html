@@ -2165,4 +2165,16 @@ document.addEventListener('click',event=>{
     localStorage.setItem('ai-visual-current-location-v2',JSON.stringify({page,view}));
   }catch(_){}
 },true);
+// AI 产出按月自动同步：连接凭据保存在服务端，切换月份时无需重复粘贴。
+(()=>{
+ const card=document.querySelector('.dashboard-ai-people');
+ if(!card)return;
+ const title=card.querySelector('.section-title');
+ const select=document.createElement('input'); select.type='month'; select.id='dashboardAiPeopleMonth';
+ select.value=document.getElementById('dashboardMonth')?.value||new Date().toISOString().slice(0,7);
+ select.style.cssText='height:30px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--soft);color:var(--text);font:13px inherit';
+ title?.append(select);
+ const load=async()=>{try{const response=await fetch('/api/dashboard-ai-sync?month='+encodeURIComponent(select.value),{credentials:'same-origin'});const data=await response.json();if(!response.ok)throw new Error(data.error||'同步失败');const people=data.ai_data?.people||[];const host=document.getElementById('dashboardAiPeopleGrid');if(host)host.querySelectorAll('.dashboard-ai-person-row').forEach(row=>row.remove());document.getElementById('dashboardAiPeopleSource').textContent=people.length?'已同步 '+select.value+' 人员明细':'该月暂无人员数据';}catch(error){document.getElementById('dashboardAiPeopleSource').textContent=error.message||'AI 数据待录入'}};
+ select.addEventListener('change',load); load();
+})();
 </script></body></html>
