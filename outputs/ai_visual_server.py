@@ -528,13 +528,19 @@ def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, 
         else:
             month = fallback_month
         row_hint = normalized(str(record.get("__sheet", "")) + " " + str(next((value for key, value in fields.items() if key in ("类型", "分类", "类别", "板块", "type")), "")))
+        # The source table uses one shared pair of quantity columns (张/条)
+        # and distinguishes media on each row via 类型. That row value must
+        # take precedence over the word “图片” in the column header.
+        row_kind = "video" if any(hint in row_hint for hint in ("视频", "video")) else "image" if any(hint in row_hint for hint in ("图片", "生图", "图像", "image")) else ""
         name = str(next((value for key, value in fields.items() if key in ("姓名", "成员", "人员", "员工", "文本") or "姓名" in key), "")).strip()
         role = str(next((value for key, value in fields.items() if key in ("岗位", "角色", "职位") or "岗位" in key), "未设置岗位")).strip() or "未设置岗位"
         for kind, hints in (("image", ("图片", "生图", "图像", "image")), ("video", ("视频", "video"))):
+            if row_kind and kind != row_kind:
+                continue
             section: dict[str, str] = {}
             for key, value in fields.items():
                 field_kind = "video" if any(hint in key for hint in ("视频", "video")) else "image" if any(hint in key for hint in ("图片", "生图", "图像", "image")) else ""
-                if field_kind and field_kind != kind or not field_kind and not any(hint in row_hint for hint in hints):
+                if not row_kind and (field_kind and field_kind != kind or not field_kind and not any(hint in row_hint for hint in hints)):
                     continue
                 if "采纳率" in key or "采用率" in key:
                     continue
