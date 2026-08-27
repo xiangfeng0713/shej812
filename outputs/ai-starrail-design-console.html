@@ -2188,6 +2188,9 @@ document.querySelectorAll('.dashboard-ai-card h2').forEach((heading,index)=>{if(
  const fmt=v=>{const n=Number(v);return Number.isFinite(n)?(Number.isInteger(n)?String(n):n.toFixed(1)):String(v||0)};
  const draw=people=>{const list=Array.isArray(people)?people:[],groups=[['设计师',p=>!/摄影|剪辑/.test(String(p.role||''))],['视频组',p=>/摄影|剪辑/.test(String(p.role||''))]];host.replaceChildren(...groups.map(([title,test])=>{const section=document.createElement('section');section.className='dashboard-ai-role';const h=document.createElement('h3');h.textContent=title;section.append(h);const rows=list.filter(test);if(!rows.length){const e=document.createElement('p');e.className='dashboard-ai-empty';e.textContent='暂无已导入成员数据';section.append(e)}else rows.forEach(p=>{const row=document.createElement('div');row.className='dashboard-ai-person-row';[[p.name,'dashboard-ai-person-name'],['生图 '+fmt(p.image_generated)],['图采纳 '+fmt(p.image_adopted)],['视频 '+fmt(p.video_generated)],['视频采纳 '+fmt(p.video_adopted)],['复用 '+fmt(p.reusable)]].forEach(([v,c],i)=>{const n=document.createElement(i?'em':'span');n.textContent=v;if(c)n.className=c;row.append(n)});section.append(row)});return section}))};
  const sync=async()=>{try{const r=await fetch('/api/dashboard-ai-sync?month='+encodeURIComponent(month.value),{credentials:'same-origin'}),d=await r.json();if(r.ok)draw(d.ai_data?.people||[])}catch(_){}};month.addEventListener('change',sync);sync();
+ // The legacy review-settings loader may finish later; re-apply the two-column
+ // grouping if it replaces our content with the old three-role layout.
+ new MutationObserver(()=>{if(host.children.length!==2)sync()}).observe(host,{childList:true});
 })();
 document.getElementById('logoutButton')?.addEventListener('click',()=>sessionStorage.removeItem('ai-visual-session-started-v2'));
 // Reuse the saved connector on every visit; only the server keeps the token.
