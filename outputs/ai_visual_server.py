@@ -515,9 +515,18 @@ def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, 
         if not isinstance(record, dict):
             continue
         fields = {normalized(key): value for key, value in record.items() if value not in (None, "")}
-        raw_month = next((str(value) for key, value in fields.items() if "月份" in key or key in ("日期", "时间", "month")), "")
-        match = re.search(r"(20\d{2})\s*[年/.\-]\s*(\d{1,2})", raw_month)
-        month = f"{match.group(1)}-{int(match.group(2)):02d}" if match and 1 <= int(match.group(2)) <= 12 else fallback_month
+        raw_month = next((str(value) for key, value in fields.items() if any(token in key for token in ("月份", "日期", "时间")) or key == "month"), "")
+        match = re.search(r"(20\d{2})\s*[年/.\-]\s*(\d{1,2})(?:\s*[月/.\-日])?", raw_month)
+        # A row without a real date must not be copied into whichever month
+        # the viewer happens to select. Only use the requested month for the
+        # legacy import format where no date column exists at all.
+        has_date_column = any(any(token in key for token in ("月份", "日期", "时间")) or key == "month" for key in fields)
+        if match and 1 <= int(match.group(2)) <= 12:
+            month = f"{match.group(1)}-{int(match.group(2)):02d}"
+        elif has_date_column:
+            continue
+        else:
+            month = fallback_month
         row_hint = normalized(str(record.get("__sheet", "")) + " " + str(next((value for key, value in fields.items() if key in ("类型", "分类", "类别", "板块", "type")), "")))
         name = str(next((value for key, value in fields.items() if key in ("姓名", "成员", "人员", "员工", "文本") or "姓名" in key), "")).strip()
         role = str(next((value for key, value in fields.items() if key in ("岗位", "角色", "职位") or "岗位" in key), "未设置岗位")).strip() or "未设置岗位"
@@ -551,8 +560,6 @@ def parse_dashboard_ai_records(records: list, fallback_month: str) -> dict[str, 
                     person["reusable"] = max(person["reusable"], metric(section.get("reusable", 0)))
     for month, people in people_by_month.items():
         result.setdefault(month, {})["people"] = list(people.values())
-    if not result:
-        raise ValueError("金山文档授权成功，但未识别到月份、AI 生成图片/视频、实际采纳或可复用素材字段。")
     return result
 
 
@@ -1244,7 +1251,12 @@ class Handler(SimpleHTTPRequestHandler):
             settings = data.setdefault("review_settings", {})
             # Backfill岗位 from账号管理 when the source table only has姓名。
             roster = {str(u.get("name")): str(u.get("tag") or "未设置岗位") for u in data.get("users", []) if isinstance(u, dict)}
-            imported_payload = imported.get(month, imported) if isinstance(imported, dict) else imported
+            imported_payload = imported.get(month, {}) if isinstance(imported, dict) else imported
+            if not isinstance(imported_payload, dict):
+                imported_payload = {}
+            imported_payload.setdefault("image", {"generated": 0, "adopted": 0})
+            imported_payload.setdefault("video", {"generated": 0, "adopted": 0})
+            imported_payload.setdefault("people", [])
             if isinstance(imported_payload, dict) and isinstance(imported_payload.get("people"), list):
                 for person in imported_payload["people"]:
                     if isinstance(person, dict) and (not person.get("role") or person.get("role") == "未设置岗位"):
@@ -1252,7 +1264,7 @@ class Handler(SimpleHTTPRequestHandler):
             stored = settings.setdefault("ai_data", {})
             # Parsers return a month-keyed mapping; persist only the selected
             # month payload to avoid creating month -> month nesting.
-            stored[month] = imported.get(month, imported) if isinstance(imported, dict) else imported
+            stored[month] = imported_payload
             write_data(data)
             self.send_json({"month": month, "ai_data": imported_payload})
             return
