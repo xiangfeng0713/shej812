@@ -34,7 +34,9 @@ SESSION_FILE = ROOT.parent / "work" / "ai-visual-sessions.json"
 REVIEW_UPLOAD_DIR = ROOT.parent / "work" / "review-imports"
 REVIEW_CASE_IMAGE_DIR = ROOT.parent / "work" / "review-case-images"
 SESSIONS: dict[str, tuple[str, float]] = {}
-SESSION_TTL_SECONDS = 8 * 60 * 60
+# Keep the local login alive for a week so a browser refresh/restart does not
+# unexpectedly return to the login screen.
+SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_REVIEW_CASE_UPLOAD_BYTES = 70 * 1024 * 1024
@@ -162,6 +164,29 @@ def read_data() -> dict:
         data.setdefault("review_cases", [])
         data.setdefault("review_case_editor_ids", [])
         data.setdefault("review_click_editor_ids", [])
+        # Older builds stored imported AI data twice (month -> month -> data).
+        # Flatten that shape on read so the dashboard can always address the
+        # selected month directly, while retaining every imported month.
+        settings = data.get("review_settings")
+        if isinstance(settings, dict) and isinstance(settings.get("ai_data"), dict):
+            ai_data = settings["ai_data"]
+            normalized_ai = {}
+            for month_key, month_value in ai_data.items():
+                value = month_value
+                if isinstance(value, dict) and isinstance(value.get(str(month_key)), dict):
+                    value = value[str(month_key)]
+                if isinstance(value, dict):
+                    normalized_ai[str(month_key)] = value
+            settings["ai_data"] = normalized_ai
+            # Fill missing roles from the account roster; AirScript rows often
+            # contain no岗位 column, but the account directory does.
+            roster = {str(u.get("name")): str(u.get("tag") or "未设置岗位") for u in data.get("users", []) if isinstance(u, dict)}
+            for month_value in normalized_ai.values():
+                people = month_value.get("people") if isinstance(month_value, dict) else None
+                if isinstance(people, list):
+                    for person in people:
+                        if isinstance(person, dict) and (not person.get("role") or person.get("role") == "未设置岗位"):
+                            person["role"] = roster.get(str(person.get("name", "")), "未设置岗位")
         return data
     except (json.JSONDecodeError, OSError):
         return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": [], "review_click_editor_ids": []}
@@ -1217,10 +1242,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             settings = data.setdefault("review_settings", {})
+            # Backfill岗位 from账号管理 when the source table only has姓名。
+            roster = {str(u.get("name")): str(u.get("tag") or "未设置岗位") for u in data.get("users", []) if isinstance(u, dict)}
+            imported_payload = imported.get(month, imported) if isinstance(imported, dict) else imported
+            if isinstance(imported_payload, dict) and isinstance(imported_payload.get("people"), list):
+                for person in imported_payload["people"]:
+                    if isinstance(person, dict) and (not person.get("role") or person.get("role") == "未设置岗位"):
+                        person["role"] = roster.get(str(person.get("name", "")), "未设置岗位")
             stored = settings.setdefault("ai_data", {})
-            stored[month] = imported
+            # Parsers return a month-keyed mapping; persist only the selected
+            # month payload to avoid creating month -> month nesting.
+            stored[month] = imported.get(month, imported) if isinstance(imported, dict) else imported
             write_data(data)
-            self.send_json({"month": month, "ai_data": imported})
+            self.send_json({"month": month, "ai_data": imported_payload})
             return
         if path not in {"/", "/ai-starrail-design-console.html"}:
             self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
@@ -1377,7 +1411,8 @@ class Handler(SimpleHTTPRequestHandler):
             settings["video_metrics"] = imported["video_metrics"]
             settings.setdefault("video_actuals", {})[month] = imported["video_actuals"]
             settings.setdefault("video_notes", {})[month] = imported["video_notes"]
-            settings.setdefault("ai_data", {})[month] = imported["ai_data"]
+            imported_ai = imported["ai_data"]
+            settings.setdefault("ai_data", {})[month] = imported_ai.get(month, imported_ai) if isinstance(imported_ai, dict) else imported_ai
             settings.setdefault("action_data", {})[month] = imported["action_data"]
             settings["updated_by"] = public_user(admin)
             settings["updated_at"] = now()
