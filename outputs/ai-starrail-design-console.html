@@ -2220,4 +2220,48 @@ document.getElementById('logoutButton')?.addEventListener('click',()=>sessionSto
 #dashboardAiMemberTooltip span{color:#64748B}
 #dashboardAiMemberTooltip strong{color:#2563EB;font-weight:600}
 #dashboard .dashboard-ai-bar-item,#dashboard .dashboard-ai-bar-item:hover,#dashboard .dashboard-ai-bar,#dashboard .dashboard-ai-bar:hover{transform:none!important;transition:none!important}
-</style></body></html>
+#dashboard .dashboard-personal-panel.personal-output-cards-panel{padding:20px;background:#fff;border-color:#E2E7F0}
+#dashboard .personal-output-cards-panel>.section-title{margin-bottom:18px}
+#dashboard .personal-output-cards-panel>.section-title h2{color:#202938;font-size:18px}
+#dashboard .personal-output-cards-panel>.section-title p{color:#6B7280;font-size:13px}
+#dashboard .personal-output-cards-panel #outputMonth{color:#2962FF;font-size:13px}
+#dashboard .personal-output-cards{border:0;border-radius:0;overflow:visible;background:transparent}
+#dashboard .personal-output-list{display:grid;gap:18px}
+#dashboard .personal-output-card{--person-accent:#2962FF;display:grid;gap:9px}
+#dashboard .personal-output-card-head{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 4px}
+#dashboard .personal-output-card-head h3{display:flex;align-items:center;gap:10px;margin:0;color:#202938;font-size:17px;line-height:24px;font-weight:400}
+#dashboard .personal-output-card-head h3 b{font-weight:600}
+#dashboard .personal-output-card-head h3 i{width:1px;height:16px;background:#B8C1CF}
+#dashboard .personal-output-card-head h3 span{color:#4B5563;font-size:14px}
+#dashboard .personal-output-card-head small{color:#6B7280;font-size:12px;white-space:nowrap}
+#dashboard .personal-output-card-body{padding:20px 24px 22px;border:1px solid #EBEFF5;border-radius:8px;background:#F6F8FC;transition:border-color .18s ease,box-shadow .18s ease}
+#dashboard .personal-output-card:hover .personal-output-card-body{border-color:color-mix(in srgb,var(--person-accent) 28%,#E2E7F0);box-shadow:0 6px 18px rgba(32,57,91,.07)}
+#dashboard .personal-output-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:34px;text-align:center}
+#dashboard .personal-output-metric span{display:block;padding:10px 8px;border:1px solid #EEF1F6;border-radius:2px;background:#fff;color:#4B5563;font-size:13px;line-height:18px}
+#dashboard .personal-output-metric .flow-status-tag{display:block!important;width:auto!important;padding:10px 8px!important;border:1px solid #EEF1F6!important;border-radius:2px!important;background:#fff!important;color:#4B5563!important;font-size:13px!important;line-height:18px!important;box-shadow:none!important}
+#dashboard .personal-output-metric b{display:block;margin-top:12px;color:#202938;font-size:26px;line-height:34px;font-weight:700}
+#dashboard .personal-output-progress{height:10px;margin:24px 2px 0;border-radius:99px;background:color-mix(in srgb,var(--person-accent) 23%,#fff);overflow:hidden}
+#dashboard .personal-output-progress i{display:block;height:100%;border-radius:inherit;background:var(--person-accent)}
+#dashboard .personal-output-empty{padding:42px 20px;border:1px dashed #D7DFEB;border-radius:8px;background:#F8FAFD;color:#8A97A8;text-align:center}
+@media(max-width:820px){#dashboard .personal-output-card-head{align-items:flex-start;flex-direction:column;gap:3px}#dashboard .personal-output-card-head small{white-space:normal}#dashboard .personal-output-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}#dashboard .personal-output-card-body{padding:16px}}
+</style>
+<script id="v2-personal-output-cards-20260827">
+(()=>{
+ const panel=document.querySelector('#dashboard .dashboard-personal-panel'),output=panel?.querySelector('.output-table');
+ if(!panel||!output)return;
+ panel.classList.add('personal-output-cards-panel');
+ const accents=['#2962FF','#F29849','#35B188','#7B47DF','#238FA6','#C65363','#4E9B3A','#C85D93'];
+ const roleOf=name=>{const user=(sharedUsers||[]).find(item=>String(item.name||'').trim()===String(name||'').trim());return user?.tag||'未设置岗位'};
+ const render=()=>{
+  const rows=[...output.querySelectorAll(':scope>.output-row')];
+  if(!rows.length)return;
+  const records=rows.map(row=>{const cells=[...row.children].map(cell=>cell.textContent.trim());return{name:cells[0]||'未命名',assigned:cells[1]||'0',amount:cells[2]||'0',completed:cells[3]||'0',rate:cells[4]||'0%'}});
+  output.classList.add('personal-output-cards');
+  output.innerHTML='<div class="personal-output-list">'+records.map((person,index)=>{const percent=Math.max(0,Math.min(100,Number.parseFloat(person.rate)||0)),accent=accents[index%accents.length];return `<article class="personal-output-card" style="--person-accent:${accent}"><header class="personal-output-card-head"><h3><b>${escapeHtml(person.name)}</b><i aria-hidden="true"></i><span>${escapeHtml(roleOf(person.name))}</span></h3><small>实时同步流程中的已分配任务与产出数量</small></header><div class="personal-output-card-body"><div class="personal-output-metrics"><div class="personal-output-metric"><span>已分配任务</span><b>${escapeHtml(person.assigned)}</b></div><div class="personal-output-metric"><span>产出数量（张/条/次）</span><b>${escapeHtml(person.amount)}</b></div><div class="personal-output-metric"><span>已完成</span><b>${escapeHtml(person.completed)}</b></div><div class="personal-output-metric"><span>完成率</span><b>${escapeHtml(person.rate)}</b></div></div><div class="personal-output-progress" aria-label="${escapeHtml(person.name)}完成率 ${escapeHtml(person.rate)}"><i style="width:${percent}%"></i></div></div></article>`}).join('')+'</div>';
+ };
+ new MutationObserver(()=>{if(output.querySelector(':scope>.output-row'))render()}).observe(output,{childList:true});
+ const liveRender=renderLiveDashboard;
+ renderLiveDashboard=function(...args){const result=liveRender.apply(this,args);render();return result};
+ render();
+})();
+</script></body></html>
