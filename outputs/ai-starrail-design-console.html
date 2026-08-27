@@ -680,18 +680,28 @@ input:disabled,select:disabled,textarea:disabled,button:disabled{color:#BEBEBE;b
 #dashboard .dashboard-department-chart .section-title{align-items:flex-start;margin-bottom:12px}
 #dashboard .department-chart-total{display:flex;align-items:center;gap:8px;color:#585858;font-size:13px;line-height:24px;white-space:nowrap}
 #dashboard .department-chart-total b{color:#2962FF;font-size:16px;line-height:24px;font-weight:600}
-#dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:16px 24px 0}
-#dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:24px;bottom:54px;left:24px;height:1px;background:#DBDCE0;content:""}
+#dashboard .dashboard-department-chart .bar-list{position:relative;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:24px;padding:16px 50px 0}
+#dashboard .dashboard-department-chart .bar-list:after{position:absolute;right:50px;bottom:54px;left:50px;height:1px;background:#DBDCE0;content:""}
 #dashboard .dashboard-department-chart .bar-list>div{position:relative;z-index:1;display:flex!important;min-width:0;min-height:286px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;padding:0;border:0;background:transparent}
 #dashboard .dashboard-department-chart .department-chart-columns{order:0;display:flex;align-items:flex-end;justify-content:center;gap:18px;height:232px}
 #dashboard .dashboard-department-chart .department-chart-columns>i{display:flex!important;width:18px;height:232px!important;flex-direction:column;align-items:center;justify-content:flex-end;overflow:visible!important;border-radius:0!important;background:transparent!important;cursor:pointer}
 #dashboard .dashboard-department-chart .department-chart-columns>i>b{display:block;margin-bottom:8px;color:#262626;font-size:14px;line-height:22px;font-weight:600}
 #dashboard .dashboard-department-chart .department-chart-columns>i>em{position:relative;display:block;width:100%!important;height:0;border-radius:4px 4px 0 0;background:var(--department-column-color)!important;transition:height .25s ease,filter .18s ease,opacity .18s ease}
-#dashboard .dashboard-department-chart .department-chart-columns>i>em:after{position:absolute;bottom:calc(100% + 12px);left:50%;z-index:5;min-width:148px;padding:10px 12px;border:1px solid #DBDCE0;border-radius:6px;background:#FFF;box-shadow:0 6px 18px rgba(38,38,38,.12);color:#262626;content:attr(data-tooltip);font-size:13px;font-style:normal;line-height:20px;opacity:0;pointer-events:none;transform:translate(-50%,4px);transition:opacity .18s ease,transform .18s ease;white-space:pre}
+#dashboard .dashboard-department-chart .department-chart-columns>i>em:after{display:none!important}
 #dashboard .dashboard-department-chart .department-chart-columns>i:hover>em{filter:brightness(.92)}
-#dashboard .dashboard-department-chart .department-chart-columns>i:hover>em:after{opacity:1;transform:translate(-50%,0)}
 #dashboard .dashboard-department-chart .department-chart-columns>.department-video-column>em{background:color-mix(in srgb,var(--department-column-color) 42%,transparent)!important}
 #dashboard .dashboard-department-chart .department-chart-columns>.department-video-column:hover>em{background:color-mix(in srgb,var(--department-column-color) 68%,transparent)!important}
+#dashboardDepartmentTooltip{position:fixed;z-index:10020;width:184px;padding:14px 15px;border:1px solid #E7E8EA;border-radius:14px;background:#FFF;box-shadow:0 12px 30px rgba(38,38,38,.16);color:#262626;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(5px);transition:opacity .15s ease,transform .15s ease,visibility .15s ease}
+#dashboardDepartmentTooltip.is-visible{opacity:1;visibility:visible;transform:translateY(0)}
+#dashboardDepartmentTooltip:after{position:absolute;top:24px;width:10px;height:10px;border-top:1px solid #E7E8EA;border-right:1px solid #E7E8EA;background:#FFF;content:""}
+#dashboardDepartmentTooltip.tooltip-left:after{right:-6px;transform:rotate(45deg)}
+#dashboardDepartmentTooltip.tooltip-right:after{left:-6px;transform:rotate(225deg)}
+#dashboardDepartmentTooltip .department-tooltip-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid #EEF0F4}
+#dashboardDepartmentTooltip .department-tooltip-head strong{overflow:hidden;color:#262626;font-size:14px;line-height:21px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+#dashboardDepartmentTooltip .department-tooltip-head span{flex:none;padding:2px 7px;border-radius:10px;background:#EEF4FF;color:#2962FF;font-size:12px;line-height:18px}
+#dashboardDepartmentTooltip .department-tooltip-row{display:flex;align-items:center;justify-content:space-between;gap:14px;color:#585858;font-size:13px;line-height:23px}
+#dashboardDepartmentTooltip .department-tooltip-row b{color:#2962FF;font-size:13px;font-weight:600;white-space:nowrap}
+@media(prefers-reduced-motion:reduce){#dashboardDepartmentTooltip{transition:none}}
 #dashboard .dashboard-department-chart .bar-list>div>span{order:1;overflow:hidden;max-width:100%;color:#262626!important;font-size:14px!important;line-height:20px!important;font-weight:500!important;text-overflow:ellipsis;white-space:nowrap}
 #dashboard .dashboard-department-chart .bar-list>div>.department-chart-share{order:2;min-height:20px;color:#585858;font-size:13px;line-height:20px;text-align:center}
 @media(max-width:760px){#dashboard .dashboard-department-chart .bar-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}#dashboard .dashboard-department-chart .bar-list:after{display:none}}
@@ -1367,8 +1377,15 @@ setInterval(()=>{
    [['.department-image-column',images,'图片','张'],['.department-video-column',videos,'视频','条']].forEach(([selector,value,type,unit])=>{
     const column=row.querySelector(selector),number=column?.querySelector('b'),bar=column?.querySelector('em');
     if(number)number.textContent=formatCount(value);
-    if(bar){bar.style.width='100%';bar.style.height=value?`${Math.max(value/maximum*86,3.5)}%`:'0';bar.dataset.tooltip=`${departments[index]}\n${type}：${formatCount(value)} ${unit}\n需求占比：${formatRate(images+videos,departmentTotal)}`}
-    if(column)column.setAttribute('aria-label',`${departments[index]}${type} ${formatCount(value)} ${unit}，需求占比 ${formatRate(images+videos,departmentTotal)}`);
+    if(bar){bar.style.width='100%';bar.style.height=value?`${Math.max(value/maximum*86,3.5)}%`:'0'}
+    if(column){
+     column.dataset.department=departments[index];
+     column.dataset.metricType=type;
+     column.dataset.metricValue=formatCount(value);
+     column.dataset.metricUnit=unit;
+     column.dataset.metricShare=formatRate(images+videos,departmentTotal);
+     column.setAttribute('aria-label',`${departments[index]}${type} ${formatCount(value)} ${unit}，需求占比 ${formatRate(images+videos,departmentTotal)}`);
+    }
    });
    const share=row.querySelector('.department-chart-share');
    if(share)share.textContent=`图片 ${formatCount(images)} 张 · 视频 ${formatCount(videos)} 条`;
@@ -1805,6 +1822,49 @@ setInterval(()=>{
   loadRoster();
  },200);
  sync();
+})();
+</script>
+<script id="v2-dashboard-department-tooltip-20260827">
+(()=>{
+ const tooltip=document.createElement('div');
+ tooltip.id='dashboardDepartmentTooltip';
+ tooltip.setAttribute('role','tooltip');
+ tooltip.setAttribute('aria-hidden','true');
+ document.body.appendChild(tooltip);
+ const clamp=(value,min,max)=>Math.min(Math.max(value,min),max);
+ const hide=()=>{
+  tooltip.classList.remove('is-visible');
+  tooltip.setAttribute('aria-hidden','true');
+ };
+ const show=column=>{
+  const type=column.dataset.metricType||'图片';
+  tooltip.innerHTML=`<div class="department-tooltip-head"><strong>${column.dataset.department||''}</strong><span>${type}</span></div><div class="department-tooltip-row"><span>${type}数量</span><b>${column.dataset.metricValue||'0'} ${column.dataset.metricUnit||''}</b></div><div class="department-tooltip-row"><span>需求占比</span><b>${column.dataset.metricShare||'0%'}</b></div>`;
+  tooltip.classList.remove('tooltip-left','tooltip-right','is-visible');
+  tooltip.style.left='0px';
+  tooltip.style.top='0px';
+  const bar=column.querySelector('em'),anchor=(bar?.getBoundingClientRect().height?bar:column).getBoundingClientRect();
+  const cardWidth=tooltip.offsetWidth,cardHeight=tooltip.offsetHeight,gap=10,edge=8;
+  const wantsLeft=column.classList.contains('department-image-column');
+  let side=wantsLeft?'left':'right';
+  let left=wantsLeft?anchor.left-cardWidth-gap:anchor.right+gap;
+  if(wantsLeft&&left<edge&&anchor.right+gap+cardWidth<=innerWidth-edge){side='right';left=anchor.right+gap}
+  if(!wantsLeft&&left+cardWidth>innerWidth-edge&&anchor.left-cardWidth-gap>=edge){side='left';left=anchor.left-cardWidth-gap}
+  left=clamp(left,edge,Math.max(edge,innerWidth-cardWidth-edge));
+  const top=clamp(anchor.top+8,edge,Math.max(edge,innerHeight-cardHeight-edge));
+  tooltip.classList.add(side==='left'?'tooltip-left':'tooltip-right');
+  tooltip.style.left=`${Math.round(left)}px`;
+  tooltip.style.top=`${Math.round(top)}px`;
+  tooltip.setAttribute('aria-hidden','false');
+  requestAnimationFrame(()=>tooltip.classList.add('is-visible'));
+ };
+ document.querySelectorAll('#dashboard .dashboard-department-chart .department-chart-columns>i').forEach(column=>{
+  column.addEventListener('mouseenter',()=>show(column));
+  column.addEventListener('mouseleave',hide);
+  column.addEventListener('focusin',()=>show(column));
+  column.addEventListener('focusout',hide);
+ });
+ addEventListener('scroll',hide,{passive:true});
+ addEventListener('resize',hide,{passive:true});
 })();
 </script>
 <script id="v2-dashboard-taskcenter-entry-motion-20260826">
