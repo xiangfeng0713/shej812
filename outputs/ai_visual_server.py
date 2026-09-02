@@ -14,6 +14,7 @@ import re
 import secrets
 import socket
 import time
+import threading
 import zipfile
 from datetime import datetime, timedelta, timezone
 from email.parser import BytesParser
@@ -42,6 +43,8 @@ MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_REVIEW_CASE_UPLOAD_BYTES = 70 * 1024 * 1024
 MAX_REVIEW_CASE_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_REVIEW_CASE_VIDEO_BYTES = 50 * 1024 * 1024
+SHARED_DELIVERY_ROOT = r"\\192.168.2.6\设计师文件"
+DEFAULT_DEPARTMENTS = ["国内电商", "海外电商", "产品市场", "线下物料", "软件私域"]
 REVIEW_CASE_IMAGE_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -155,11 +158,12 @@ def password_valid(password: str, user: dict) -> bool:
 
 def read_data() -> dict:
     if not DATA_FILE.exists():
-        return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": [], "review_click_editor_ids": []}
+        return {"users": [], "tasks": [], "departments": list(DEFAULT_DEPARTMENTS), "review_uploads": [], "review_cases": [], "review_case_editor_ids": [], "review_click_editor_ids": []}
     try:
         data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         data.setdefault("users", [])
         data.setdefault("tasks", [])
+        data.setdefault("departments", list(DEFAULT_DEPARTMENTS))
         data.setdefault("review_uploads", [])
         data.setdefault("review_cases", [])
         data.setdefault("review_case_editor_ids", [])
@@ -192,11 +196,17 @@ def read_data() -> dict:
         return {"users": [], "tasks": [], "review_uploads": [], "review_cases": [], "review_case_editor_ids": [], "review_click_editor_ids": []}
 
 
+DATA_WRITE_LOCK = threading.Lock()
+
+
 def write_data(data: dict) -> None:
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp = DATA_FILE.with_suffix(".tmp")
-    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp.replace(DATA_FILE)
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    # 看板轮询与提交可能并发写入；独立临时文件并串行替换，避免 Windows 文件占用导致提交丢失。
+    with DATA_WRITE_LOCK:
+        temp = DATA_FILE.with_name(f"{DATA_FILE.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
+        temp.write_text(payload, encoding="utf-8")
+        temp.replace(DATA_FILE)
 
 
 def xlsx_cell_text(cell: ElementTree.Element, shared_strings: list[str], namespace: dict[str, str]) -> str:
@@ -697,8 +707,22 @@ def parse_review_workbook(content: bytes, selected_month: str) -> dict:
     }
 
 
+def is_super_admin(user: dict | None) -> bool:
+    if not user:
+        return False
+    # Existing installations predate the explicit owner flag. Keep the original
+    # xiangfeng administrator as the immutable owner during migration.
+    return bool(user.get("is_super_admin") or (user.get("is_admin") and user.get("username") == "xiangfeng"))
+
+
 def public_user(user: dict) -> dict:
-    return {key: user.get(key, "") for key in ("id", "username", "name", "tag", "is_admin", "active")}
+    result = {key: user.get(key, "") for key in ("id", "username", "name", "tag", "is_admin", "active")}
+    result["is_super_admin"] = is_super_admin(user)
+    return result
+
+
+def can_manage_departments(user: dict | None) -> bool:
+    return bool(user and (user.get("is_admin") or "部门管理员" in str(user.get("tag", ""))))
 
 
 def active_users(data: dict) -> list[dict]:
@@ -794,7 +818,11 @@ def user_by_id(data: dict, user_id: str) -> dict | None:
 
 
 def admin_user(data: dict) -> dict | None:
-    return next((user for user in active_users(data) if user.get("is_admin")), None)
+    # Workflow ownership remains with the system owner even when other accounts
+    # receive administrator access.
+    return next((user for user in active_users(data) if is_super_admin(user)), None) or next(
+        (user for user in active_users(data) if user.get("is_admin")), None
+    )
 
 
 def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple[str, list[str]]:
@@ -824,17 +852,25 @@ def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple
         if not owner:
             raise ValueError("请选择设计负责人。")
         task["design_owner"] = public_user(owner)
-        task["coop_designers"] = [public_user(partner) for partner in partners]
-        # Retain the legacy field so existing task records and old views stay compatible.
-        task["coop_designer"] = task["coop_designers"][0] if task["coop_designers"] else None
-        return "需求校对", [owner["id"], *[partner["id"] for partner in partners]]
+        # 协助人员在需求校对阶段由主负责人按实际工作量选择，此处只确定主负责人。
+        task["coop_designers"] = []
+        task["coop_designer"] = None
+        task["collaborator_ids"] = []
+        return "需求校对", [owner["id"]]
     if action == "proof_pass":
         if not owner:
             raise ValueError("请先完成设计负责人分配。")
+        # 校对通过时保存主负责人选择的协助人员，供任务中心和数据看板统计。
+        task["coop_designers"] = [public_user(partner) for partner in partners]
+        task["coop_designer"] = task["coop_designers"][0] if task["coop_designers"] else None
+        task["collaborator_ids"] = [partner["id"] for partner in partners]
         return "需求交付", [owner["id"]]
     if action == "proof_return":
         if not owner:
             raise ValueError("请先完成设计负责人分配。")
+        task["coop_designers"] = [public_user(partner) for partner in partners]
+        task["coop_designer"] = task["coop_designers"][0] if task["coop_designers"] else None
+        task["collaborator_ids"] = [partner["id"] for partner in partners]
         task["resubmit_stage"] = "需求校对"
         task["resubmit_assignee_ids"] = [owner["id"], *[partner["id"] for partner in partners]]
         return "填写需求", [submitter_id]
@@ -855,6 +891,21 @@ def stage_assignees(data: dict, task: dict, action: str, payload: dict) -> tuple
             raise ValueError("请先完成设计负责人分配。")
         return "需求交付", [owner["id"]]
     raise ValueError("不支持的流程操作。")
+
+
+ACTION_STAGES = {
+    "approval_pass": "部门负责人审批",
+    "approval_return": "部门负责人审批",
+    "allocation_confirm": "设计需求分配",
+    "proof_pass": "需求校对",
+    "proof_return": "需求校对",
+    "delivery_confirm": "需求交付",
+    "review_pass": "初稿审核",
+    "review_return": "初稿审核",
+    "acceptance_pass": "需求方验收 / 评分",
+    "acceptance_return": "需求方验收 / 评分",
+    "resubmit": "填写需求",
+}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -1019,6 +1070,13 @@ class Handler(SimpleHTTPRequestHandler):
             return None, data
         return user, data
 
+    def require_super_admin(self, data: dict | None = None) -> tuple[dict | None, dict]:
+        user, data = self.require_user(data)
+        if user and not is_super_admin(user):
+            self.send_json({"error": "仅超级管理员可以授予或取消管理员权限。"}, HTTPStatus.FORBIDDEN)
+            return None, data
+        return user, data
+
     def require_review_case_editor(self, data: dict | None = None) -> tuple[dict | None, dict]:
         user, data = self.require_user(data)
         if user and not user.get("is_admin") and user.get("id") not in data.get("review_case_editor_ids", []):
@@ -1053,6 +1111,14 @@ class Handler(SimpleHTTPRequestHandler):
             if user:
                 self.send_json({"users": [public_user(item) for item in active_users(data)]})
             return
+        if path == "/api/departments":
+            user, data = self.require_user(data)
+            if user:
+                self.send_json({
+                    "departments": data.get("departments", list(DEFAULT_DEPARTMENTS)),
+                    "can_manage": can_manage_departments(user),
+                })
+            return
         if path == "/api/coop-designer-roster":
             user, data = self.require_user(data)
             if user:
@@ -1064,7 +1130,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/tasks":
             user, data = self.require_user(data)
             if user:
-                my_tasks = [task for task in data["tasks"] if user["id"] in task.get("assignee_ids", [])]
+                my_tasks = [task for task in data["tasks"] if user["id"] in task.get("assignee_ids", []) or user["id"] in task.get("collaborator_ids", [])]
                 submitted_tasks = [task for task in data["tasks"] if task.get("submitter", {}).get("id") == user["id"]]
                 processed_tasks = [
                     task for task in data["tasks"]
@@ -1235,6 +1301,15 @@ class Handler(SimpleHTTPRequestHandler):
             # is rendered. Keep them available while directory browsing remains off.
             super().do_GET()
             return
+        if path == "/api/dashboard-ai-people":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            query = parse_qs(urlparse(self.path).query)
+            month = str(query.get("month", [datetime.now().strftime("%Y-%m")])[0])
+            people = data.get("review_settings", {}).get("ai_data", {}).get(month, {}).get("people", [])
+            self.send_json({"month": month, "people": people if isinstance(people, list) else []})
+            return
         if path == "/api/dashboard-ai-sync":
             user, data = self.require_user(data)
             if not user:
@@ -1274,7 +1349,11 @@ class Handler(SimpleHTTPRequestHandler):
             write_data(data)
             self.send_json({"month": month, "ai_data": imported_payload})
             return
-        if path not in {"/", "/ai-starrail-design-console.html"}:
+        if path == "/":
+            # Serve the console directly at the stable preview root.  Some
+            # embedded browsers reject or time out on the extra local redirect.
+            self.path = "/ai-starrail-design-console.html"
+        elif path != "/ai-starrail-design-console.html":
             self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
             return
         super().do_GET()
@@ -1283,6 +1362,90 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.require_same_origin():
             return
         path = urlparse(self.path).path
+        data = read_data()
+        if path == "/api/dashboard-ai-people":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            payload = self.read_json()
+            if not isinstance(payload, dict):
+                return
+            month = str(payload.get("month", ""))
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请选择正确的统计月份。"}, HTTPStatus.BAD_REQUEST)
+                return
+            incoming = payload.get("people", [])
+            if not isinstance(incoming, list) or len(incoming) > 500:
+                self.send_json({"error": "个人明细数据格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            clean = []
+            for item in incoming:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", "")).strip()[:80]
+                if not name or (not user.get("is_admin") and name != str(user.get("name", ""))):
+                    continue
+                kind = "视频" if str(item.get("type", "图片")).strip() == "视频" else "图片"
+                def nonnegative(key):
+                    try:
+                        return max(0, float(item.get(key, 0) or 0))
+                    except (TypeError, ValueError):
+                        return 0
+                generated, adopted = nonnegative("generated"), nonnegative("adopted")
+                clean.append({
+                    "id": str(item.get("id") or f"ai_{month}_{len(clean)+1}"),
+                    "name": name,
+                    "date": str(item.get("date") or month)[:20],
+                    "type": kind,
+                    "generated": generated,
+                    "adopted": min(adopted, generated) if generated else 0,
+                    "reusable": str(item.get("reusable", "")).strip()[:200],
+                    "updated_by": public_user(user),
+                    "updated_at": now(),
+                })
+            settings = data.setdefault("review_settings", {})
+            ai_data = settings.setdefault("ai_data", {})
+            bucket = ai_data.setdefault(month, {})
+            existing = bucket.get("people", []) if isinstance(bucket.get("people", []), list) else []
+            if user.get("is_admin"):
+                merged = clean
+            else:
+                own_names = {item.get("name") for item in clean}
+                merged = [item for item in existing if item.get("name") not in own_names] + clean
+            bucket["people"] = merged
+            settings["updated_by"] = public_user(user)
+            settings["updated_at"] = now()
+            write_data(data)
+            self.send_json({"month": month, "people": merged})
+            return
+        path = urlparse(self.path).path
+        if path == "/api/open-shared-folder":
+            user, _ = self.require_user()
+            if not user:
+                return
+            payload = self.read_json()
+            if payload is None:
+                return
+            requested = str(payload.get("path", "")).strip().replace("/", "\\")
+            while requested.startswith("\\\\\\"):
+                requested = requested[1:]
+            requested = os.path.normpath(requested)
+            root = os.path.normpath(SHARED_DELIVERY_ROOT)
+            requested_folded = requested.casefold()
+            root_folded = root.casefold()
+            if requested_folded != root_folded and not requested_folded.startswith(root_folded + "\\"):
+                self.send_json({"error": "仅支持打开设计师文件共享盘内的路径。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if not os.path.isdir(requested):
+                self.send_json({"error": "共享盘文件夹不存在或当前电脑无访问权限。"}, HTTPStatus.NOT_FOUND)
+                return
+            try:
+                os.startfile(requested)
+            except OSError:
+                self.send_json({"error": "无法打开共享盘文件夹，请检查路径和访问权限。"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.send_json({"opened": True})
+            return
         if path == "/api/coop-designer-roster":
             data = read_data()
             admin, data = self.require_admin(data)
@@ -1603,7 +1766,7 @@ class Handler(SimpleHTTPRequestHandler):
             if len(password) < 8:
                 self.send_json({"error": "管理员密码至少需要 8 位。"}, HTTPStatus.BAD_REQUEST)
                 return
-            user = {"id": secrets.token_hex(12), "username": "xiangfeng", "name": "向峰", "tag": "管理", "is_admin": True, "active": True, "password": password_hash(password), "created_at": now()}
+            user = {"id": secrets.token_hex(12), "username": "xiangfeng", "name": "向峰", "tag": "管理", "is_admin": True, "is_super_admin": True, "active": True, "password": password_hash(password), "created_at": now()}
             data["users"].append(user)
             write_data(data)
             token = create_session(user["id"])
@@ -1655,6 +1818,31 @@ class Handler(SimpleHTTPRequestHandler):
             write_data(data)
             self.send_json({"user": public_user(user)}, HTTPStatus.CREATED)
             return
+        if path == "/api/departments":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            if not can_manage_departments(user):
+                self.send_json({"error": "仅部门管理员可以维护提交人部门。"}, HTTPStatus.FORBIDDEN)
+                return
+            incoming = payload.get("departments")
+            if not isinstance(incoming, list):
+                self.send_json({"error": "部门列表格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            departments = [str(item).strip() for item in incoming]
+            if not departments or len(departments) > 30:
+                self.send_json({"error": "请至少保留 1 个部门，最多可设置 30 个。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if any(not name or len(name) > 20 for name in departments):
+                self.send_json({"error": "部门名称不能为空，且不能超过 20 个字符。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(set(departments)) != len(departments):
+                self.send_json({"error": "部门名称不能重复。"}, HTTPStatus.BAD_REQUEST)
+                return
+            data["departments"] = departments
+            write_data(data)
+            self.send_json({"departments": departments, "can_manage": True})
+            return
         if path == "/api/tasks":
             user, data = self.require_user(data)
             if not user:
@@ -1671,13 +1859,25 @@ class Handler(SimpleHTTPRequestHandler):
             if not approver:
                 self.send_json({"error": "请选择需求内部审批人。"}, HTTPStatus.BAD_REQUEST)
                 return
+            delivery_date = str(task.get("delivery_date", "")).strip()
+            delivery_time = str(task.get("delivery_time", "")).strip()
+            try:
+                expected_delivery = datetime.strptime(
+                    f"{delivery_date} {delivery_time}", "%Y-%m-%d %H:%M"
+                )
+            except ValueError:
+                self.send_json({"error": "请填写有效的期望交付日期和时间。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if expected_delivery <= datetime.now():
+                self.send_json({"error": "期望交付时间必须晚于当前时间。"}, HTTPStatus.BAD_REQUEST)
+                return
             created_at = now()
             record = {"id": secrets.token_hex(10), "name": str(task["name"]).strip(), "submitter": public_user(submitter), "created_by": public_user(user), "approver": public_user(approver), "department": str(task.get("department", "")), "type": str(task.get("type", "图片")), "quantity": int(task.get("quantity") or 0), "priority": str(task.get("priority", "常规")), "copy_link": str(task.get("copy_link", "")), "stage": "部门负责人审批", "assignee_ids": [approver["id"]], "history": [{"action": "submitted", "by": public_user(user), "at": created_at}], "created_at": created_at, "updated_at": created_at}
             record.update({
                 "submit_date": str(task.get("submit_date", "")),
                 "submit_time": str(task.get("submit_time", "")),
-                "delivery_date": str(task.get("delivery_date", "")),
-                "delivery_time": str(task.get("delivery_time", "")),
+                "delivery_date": delivery_date,
+                "delivery_time": delivery_time,
                 "image_spec": str(task.get("image_spec", "")),
             })
             data["tasks"].append(record)
@@ -1749,29 +1949,97 @@ class Handler(SimpleHTTPRequestHandler):
         if not task:
             self.send_json({"error": "未找到该任务。"}, HTTPStatus.NOT_FOUND)
             return
-        is_admin_override = user.get("is_admin") and user["id"] not in task.get("assignee_ids", [])
-        if not is_admin_override and user["id"] not in task.get("assignee_ids", []):
-            self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
-            return
         payload = self.read_json()
         if payload is None:
             return
+        action = str(payload.get("action", ""))
+        expected_stage = ACTION_STAGES.get(action)
+        if expected_stage and task.get("stage") != expected_stage:
+            self.send_json({"error": f"当前任务不在“{expected_stage}”节点，不能执行此操作。"}, HTTPStatus.CONFLICT)
+            return
+        # 管理员拥有全流程查看和代办权限；代办时在历史记录中保留管理员身份。
+        is_admin_override = bool(user.get("is_admin") and user["id"] not in task.get("assignee_ids", []))
+        if not is_admin_override and user["id"] not in task.get("assignee_ids", []):
+            self.send_json({"error": "该任务当前不在你的待办中。"}, HTTPStatus.FORBIDDEN)
+            return
+        if path == "/api/dashboard-ai-people":
+            user, data = self.require_user()
+            if not user:
+                return
+            payload = self.read_json()
+            if not isinstance(payload, dict):
+                return
+            month = str(payload.get("month", ""))
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请选择正确的统计月份。"}, HTTPStatus.BAD_REQUEST)
+                return
+            incoming = payload.get("people", [])
+            if not isinstance(incoming, list) or len(incoming) > 500:
+                self.send_json({"error": "个人明细数据格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            clean = []
+            for item in incoming:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", "")).strip()[:80]
+                if not name:
+                    continue
+                if not user.get("is_admin") and name != str(user.get("name", "")):
+                    continue
+                kind = "视频" if str(item.get("type", "图片")).strip() == "视频" else "图片"
+                def nonnegative(key):
+                    try: return max(0, float(item.get(key, 0) or 0))
+                    except (TypeError, ValueError): return 0
+                generated, adopted = nonnegative("generated"), nonnegative("adopted")
+                clean.append({"id": str(item.get("id") or f"ai_{month}_{len(clean)+1}"), "name": name, "date": str(item.get("date") or month)[:20], "type": kind, "generated": generated, "adopted": min(adopted, generated) if generated else 0, "reusable": str(item.get("reusable", "")).strip()[:200], "updated_by": public_user(user), "updated_at": now()})
+            settings = data.setdefault("review_settings", {}); ai_data = settings.setdefault("ai_data", {}); bucket = ai_data.setdefault(month, {}); existing = bucket.get("people", []) if isinstance(bucket.get("people", []), list) else []
+            if user.get("is_admin"):
+                merged = clean
+            else:
+                own_names = {item.get("name") for item in clean}; merged = [item for item in existing if item.get("name") not in own_names] + clean
+            bucket["people"] = merged; settings["updated_by"] = public_user(user); settings["updated_at"] = now(); write_data(data)
+            self.send_json({"month": month, "people": merged})
+            return
+        if action == "acceptance_pass":
+            raw_score = payload.get("manual_score")
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                score = None
+            if score not in {95.0, 85.0, 70.0, 50.0}:
+                self.send_json({"error": "请选择人工复核评分等级。"}, HTTPStatus.BAD_REQUEST)
+                return
         previous_stage = task["stage"]
         try:
-            task["stage"], task["assignee_ids"] = stage_assignees(data, task, str(payload.get("action", "")), payload)
+            task["stage"], task["assignee_ids"] = stage_assignees(data, task, action, payload)
         except ValueError as error:
             self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
         comment = str(payload.get("comment", "")).strip()
-        if str(payload.get("action", "")) == "delivery_confirm":
+        if action in {"approval_pass", "approval_return"} and "priority" in payload:
+            priority = str(payload.get("priority", "")).strip()
+            if priority not in {"常规", "中等", "加急"}:
+                self.send_json({"error": "优先级只能是常规、中等或加急。"}, HTTPStatus.BAD_REQUEST)
+                return
+            task["priority"] = priority
+        if action == "delivery_confirm":
             task.update({
                 "shared_path": str(payload.get("shared_path", "")).strip(),
                 "final_delivery_date": str(payload.get("final_delivery_date", "")).strip(),
                 "final_delivery_time": str(payload.get("final_delivery_time", "")).strip(),
             })
+        if action == "acceptance_pass":
+            task["acceptance_owner"] = public_user(user)
+            task["manual_score"] = float(payload.get("manual_score")) if payload.get("manual_score") not in (None, "") else None
         if comment:
             task["last_return"] = {"comment": comment, "by": public_user(user), "at": now()}
-        task.setdefault("history", []).append({"action": str(payload.get("action", "")), "from_stage": previous_stage, "to_stage": task["stage"], "by": public_user(user), "comment": comment, "admin_override": bool(is_admin_override), "at": now()})
+        proof_checks = payload.get("proof_checks") if action == "proof_return" else None
+        if action == "proof_return" and isinstance(proof_checks, dict):
+            task.setdefault("last_return", {"comment": comment, "by": public_user(user), "at": now()})["proof_checks"] = proof_checks
+        event = {"action": action, "from_stage": previous_stage, "to_stage": task["stage"], "by": public_user(user), "comment": comment, "admin_override": bool(is_admin_override), "at": now()}
+        if action == "proof_return" and isinstance(proof_checks, dict):
+            event["proof_checks"] = proof_checks
+        task.setdefault("history", []).append(event)
         task["updated_at"] = now()
         write_data(data)
         self.send_json({"task": task})
@@ -1832,10 +2100,25 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": "只能修改自己的账号资料。"}, HTTPStatus.FORBIDDEN)
             return
         payload = self.read_json()
+        if payload is None:
+            return
+        if "is_admin" in payload:
+            if not isinstance(payload.get("is_admin"), bool):
+                self.send_json({"error": "管理员权限值无效。"}, HTTPStatus.BAD_REQUEST)
+                return
+            owner, data = self.require_super_admin(data)
+            if not owner:
+                return
+            if is_super_admin(user):
+                self.send_json({"error": "不能修改超级管理员权限。"}, HTTPStatus.BAD_REQUEST)
+                return
+            user["is_admin"] = bool(payload.get("is_admin"))
+            user["admin_updated_by"] = public_user(owner)
+            user["admin_updated_at"] = now()
         # Ordinary users can only rotate their own password. Account identity and
         # job information remain managed by the administrator.
-        username = user["username"] if not actor.get("is_admin") else str(payload.get("username", "")).strip()
-        name = user["name"] if not actor.get("is_admin") else str(payload.get("name", "")).strip()
+        username = user["username"] if not actor.get("is_admin") else str(payload.get("username", user["username"])).strip()
+        name = user["name"] if not actor.get("is_admin") else str(payload.get("name", user["name"])).strip()
         password = str(payload.get("password", ""))
         if not username or not name:
             self.send_json({"error": "账号和姓名不能为空。"}, HTTPStatus.BAD_REQUEST)
@@ -1849,7 +2132,7 @@ class Handler(SimpleHTTPRequestHandler):
         user["username"] = username
         user["name"] = name
         if actor.get("is_admin"):
-            user["tag"] = str(payload.get("tag", "")).strip()
+            user["tag"] = str(payload.get("tag", user.get("tag", ""))).strip()
         if password:
             user["password"] = password_hash(password)
         write_data(data)
