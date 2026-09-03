@@ -13,6 +13,7 @@ import posixpath
 import re
 import secrets
 import socket
+import subprocess
 import time
 import threading
 import zipfile
@@ -34,6 +35,7 @@ DATA_FILE = ROOT.parent / "work" / "ai-visual-shared-data.json"
 SESSION_FILE = ROOT.parent / "work" / "ai-visual-sessions.json"
 REVIEW_UPLOAD_DIR = ROOT.parent / "work" / "review-imports"
 REVIEW_CASE_IMAGE_DIR = ROOT.parent / "work" / "review-case-images"
+FFMPEG_EXE = ROOT / ".video-tools" / "imageio_ffmpeg" / "binaries" / "ffmpeg-win-x86_64-v7.1.exe"
 SESSIONS: dict[str, tuple[str, float]] = {}
 # Keep the local login alive for a week so a browser refresh/restart does not
 # unexpectedly return to the login screen.
@@ -45,6 +47,16 @@ MAX_REVIEW_CASE_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_REVIEW_CASE_VIDEO_BYTES = 50 * 1024 * 1024
 SHARED_DELIVERY_ROOT = r"\\192.168.2.6\设计师文件"
 DEFAULT_DEPARTMENTS = ["国内电商", "海外电商", "产品市场", "线下物料", "软件私域"]
+AI_ARCHIVE_ROOT = Path(r"\\192.168.2.6\设计师文件\AI图片存档")
+AI_ARCHIVE_DEPARTMENTS = (
+    ("国内电商", "国内电商"),
+    ("海外电商", "海外电商"),
+    ("代理线", "代理线"),
+    ("私域软件", "软件私域"),
+)
+AI_ARCHIVE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".heic"}
+AI_ARCHIVE_EXCLUDED_DIRS = {".workbuddy", "测试", "归档推送机器人", "__pycache__"}
+AI_ARCHIVE_SYNC_LOCK = threading.Lock()
 REVIEW_CASE_IMAGE_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -166,6 +178,8 @@ def read_data() -> dict:
         data.setdefault("departments", list(DEFAULT_DEPARTMENTS))
         data.setdefault("review_uploads", [])
         data.setdefault("review_cases", [])
+        data.setdefault("review_case_modules", {})
+        data.setdefault("review_case_module_types", {})
         data.setdefault("review_case_editor_ids", [])
         data.setdefault("review_click_editor_ids", [])
         # Older builds stored imported AI data twice (month -> month -> data).
@@ -207,6 +221,188 @@ def write_data(data: dict) -> None:
         temp = DATA_FILE.with_name(f"{DATA_FILE.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
         temp.write_text(payload, encoding="utf-8")
         temp.replace(DATA_FILE)
+
+
+def previous_month(value: datetime | None = None) -> str:
+    current = value or datetime.now()
+    first = current.replace(day=1)
+    return (first - timedelta(days=1)).strftime("%Y-%m")
+
+
+def normalize_review_channel_notes(value: object) -> dict[str, dict[str, str]]:
+    """Return separate domestic/overseas notes while retaining legacy notes."""
+    raw = value if isinstance(value, dict) else {}
+    if isinstance(raw.get("domestic"), dict) or isinstance(raw.get("overseas"), dict):
+        return {
+            channel: {
+                "anomaly": str((raw.get(channel) or {}).get("anomaly", "")),
+                "improvement": str((raw.get(channel) or {}).get("improvement", "")),
+            }
+            for channel in ("domestic", "overseas")
+        }
+    legacy = {
+        "anomaly": str(raw.get("anomaly", "")),
+        "improvement": str(raw.get("improvement", "")),
+    }
+    return {"domestic": dict(legacy), "overseas": dict(legacy)}
+
+
+def scan_ai_archive_month(month: str) -> dict:
+    """Read the shared AI image archive and aggregate one natural month.
+
+    Qualified images remain the AI output total. Any image below a directory
+    whose name contains ``不合格`` is counted separately and never added to
+    qualified output. Direct child directories under each department are the
+    people roster shown in the review UI.
+    """
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise ValueError("统计月份格式不正确。")
+    if not AI_ARCHIVE_ROOT.is_dir():
+        raise OSError("AI图片存档共享盘当前不可访问。")
+
+    start = datetime.strptime(month, "%Y-%m")
+    end = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    start_ts, end_ts = start.timestamp(), end.timestamp()
+    departments = []
+
+    for source_name, display_name in AI_ARCHIVE_DEPARTMENTS:
+        department_path = AI_ARCHIVE_ROOT / source_name
+        people: dict[str, dict[str, int | str]] = {}
+        department_total = 0
+        department_unqualified = 0
+        if department_path.is_dir():
+            try:
+                for child in department_path.iterdir():
+                    if child.is_dir() and child.name not in AI_ARCHIVE_EXCLUDED_DIRS and "不合格" not in child.name:
+                        people[child.name] = {"name": child.name, "total": 0, "unqualified": 0}
+            except OSError:
+                pass
+
+            for directory, dirnames, filenames in os.walk(department_path):
+                dirnames[:] = [name for name in dirnames if name not in AI_ARCHIVE_EXCLUDED_DIRS]
+                relative_parts = Path(directory).relative_to(department_path).parts
+                invalid_index = next((index for index, part in enumerate(relative_parts) if "不合格" in part), None)
+                if relative_parts:
+                    if invalid_index is None:
+                        person_name = relative_parts[0]
+                    elif invalid_index == 0:
+                        person_name = relative_parts[1] if len(relative_parts) > 1 else ""
+                    else:
+                        person_name = relative_parts[0]
+                else:
+                    person_name = ""
+                if person_name in AI_ARCHIVE_EXCLUDED_DIRS or "不合格" in person_name:
+                    person_name = ""
+                for filename in filenames:
+                    if Path(filename).suffix.lower() not in AI_ARCHIVE_IMAGE_SUFFIXES:
+                        continue
+                    file_path = Path(directory) / filename
+                    try:
+                        modified = file_path.stat().st_mtime
+                    except OSError:
+                        continue
+                    if not start_ts <= modified < end_ts:
+                        continue
+                    is_unqualified = invalid_index is not None
+                    if is_unqualified:
+                        department_unqualified += 1
+                    else:
+                        department_total += 1
+                    if person_name:
+                        record = people.setdefault(person_name, {"name": person_name, "total": 0, "unqualified": 0})
+                        record["unqualified" if is_unqualified else "total"] += 1
+
+        departments.append({
+            "department": display_name,
+            "total": department_total,
+            "unqualified": department_unqualified,
+            "people": sorted(people.values(), key=lambda item: str(item["name"])),
+        })
+
+    return {
+        "month": month,
+        "source": "共享盘自动归档",
+        "path": str(AI_ARCHIVE_ROOT),
+        "scanned_at": now(),
+        "statistics_ready": True,
+        "total": sum(int(item["total"]) for item in departments),
+        "unqualified": sum(int(item["unqualified"]) for item in departments),
+        "departments": departments,
+    }
+
+
+def ai_archive_roster(month: str) -> dict:
+    """Return the fixed archive department/person roster without counting files.
+
+    Current and future review months have no finalized archive statistics yet,
+    but the review page should still show who belongs to each department.
+    """
+    if not AI_ARCHIVE_ROOT.is_dir():
+        raise OSError("AI图片存档共享盘当前不可访问。")
+    departments = []
+    for source_name, display_name in AI_ARCHIVE_DEPARTMENTS:
+        department_path = AI_ARCHIVE_ROOT / source_name
+        people = []
+        if department_path.is_dir():
+            try:
+                people = [
+                    {"name": child.name, "total": 0, "unqualified": 0}
+                    for child in department_path.iterdir()
+                    if child.is_dir()
+                    and child.name not in AI_ARCHIVE_EXCLUDED_DIRS
+                    and "不合格" not in child.name
+                ]
+            except OSError:
+                pass
+        departments.append({
+            "department": display_name,
+            "total": 0,
+            "unqualified": 0,
+            "people": sorted(people, key=lambda item: str(item["name"])),
+        })
+    return {
+        "month": month,
+        "source": "共享盘目录",
+        "path": str(AI_ARCHIVE_ROOT),
+        "statistics_ready": False,
+        "total": 0,
+        "unqualified": 0,
+        "departments": departments,
+    }
+
+
+def save_ai_archive_month(month: str, force: bool = False) -> dict:
+    """Scan and persist one month without replacing the other AI data fields."""
+    with AI_ARCHIVE_SYNC_LOCK:
+        latest = read_data()
+        bucket = latest.setdefault("review_settings", {}).setdefault("ai_data", {}).setdefault(month, {})
+        existing = bucket.get("archive_non_design")
+        if isinstance(existing, dict) and not force:
+            return existing
+        snapshot = scan_ai_archive_month(month)
+        bucket["archive_non_design"] = snapshot
+        write_data(latest)
+        return snapshot
+
+
+def ai_archive_monthly_sync_loop() -> None:
+    """Backfill the previous month, then refresh it automatically every month on day 1."""
+    last_sync_key = ""
+    while True:
+        current = datetime.now()
+        target = previous_month(current)
+        try:
+            data = read_data()
+            existing = data.get("review_settings", {}).get("ai_data", {}).get(target, {}).get("archive_non_design")
+            sync_key = f"{current:%Y-%m-%d}:{target}"
+            should_refresh = current.day == 1 and sync_key != last_sync_key
+            if not isinstance(existing, dict) or should_refresh:
+                save_ai_archive_month(target, force=should_refresh)
+                last_sync_key = sync_key
+        except (OSError, ValueError):
+            # Keep the console available when the LAN share is temporarily offline.
+            pass
+        time.sleep(15 * 60)
 
 
 def xlsx_cell_text(cell: ElementTree.Element, shared_strings: list[str], namespace: dict[str, str]) -> str:
@@ -725,6 +921,11 @@ def can_manage_departments(user: dict | None) -> bool:
     return bool(user and (user.get("is_admin") or "部门管理员" in str(user.get("tag", ""))))
 
 
+def is_visual_staff(user: dict | None) -> bool:
+    """Visual production roles allowed to manage review case modules."""
+    return bool(user and (user.get("is_admin") or re.search(r"(?:设计师|摄影师|剪辑师|渲染师)", str(user.get("tag", "")))))
+
+
 def active_users(data: dict) -> list[dict]:
     return [user for user in data["users"] if user.get("active", True)]
 
@@ -734,11 +935,10 @@ def coop_designer_user_ids(data: dict) -> list[str]:
     active_ids = {user["id"] for user in users}
     saved = data.get("coop_designer_user_ids")
     if not isinstance(saved, list):
-        role_pattern = re.compile(r"(?:设计师|摄影师|剪辑师|渲染师)")
         return [
             user["id"]
             for user in users
-            if user.get("is_admin") or role_pattern.search(str(user.get("tag", "")))
+            if is_visual_staff(user)
         ]
     return list(dict.fromkeys(str(user_id) for user_id in saved if str(user_id) in active_ids))
 
@@ -772,7 +972,7 @@ def normalize_review_case(payload: dict) -> dict:
         if not matched_rate:
             raise ValueError("请填写 0% 到 100% 的真实点击率，最多保留两位小数。")
         click_rate = f"{matched_rate.group(1)}%"
-    elif (media_type == "image" and slot not in range(1, 6)) or (media_type == "video" and slot != 6):
+    elif slot not in range(1, 25):
         raise ValueError("案例卡位不正确。")
     if task_id and not re.fullmatch(r"[0-9a-f]{20}", task_id):
         raise ValueError("关联任务不正确。")
@@ -795,6 +995,35 @@ def review_case_task(data: dict, task_id: str) -> dict:
     }
 
 
+def review_case_modules(data: dict, month: str) -> dict[str, list[int]]:
+    """Return the admin-managed case module slots for one review month."""
+    stored = data.get("review_case_modules", {})
+    bucket = stored.get(month, {}) if isinstance(stored, dict) else {}
+    result = {}
+    for category in ("excellent", "improvement"):
+        raw = bucket.get(category) if isinstance(bucket, dict) else None
+        if isinstance(raw, list):
+            result[category] = sorted({int(slot) for slot in raw if isinstance(slot, int) and 1 <= slot <= 24})
+        else:
+            result[category] = list(range(1, 7))
+    return result
+
+
+def review_case_module_types(data: dict, month: str, modules: dict[str, list[int]] | None = None) -> dict[str, dict[str, str]]:
+    """Return image/video types for the configured monthly case modules."""
+    modules = modules or review_case_modules(data, month)
+    stored = data.get("review_case_module_types", {})
+    bucket = stored.get(month, {}) if isinstance(stored, dict) else {}
+    result = {}
+    for category, slots in modules.items():
+        category_types = bucket.get(category, {}) if isinstance(bucket, dict) else {}
+        result[category] = {
+            str(slot): (str(category_types.get(str(slot), "")).strip() if isinstance(category_types, dict) else "") or ("video" if slot == 6 else "image")
+            for slot in slots
+        }
+    return result
+
+
 def valid_review_case_image(mime_type: str, content: bytes) -> bool:
     if mime_type == "image/jpeg":
         return content.startswith(b"\xff\xd8\xff")
@@ -811,6 +1040,39 @@ def valid_review_case_video(mime_type: str, content: bytes) -> bool:
     if mime_type == "video/webm":
         return content.startswith(b"\x1a\x45\xdf\xa3")
     return False
+
+
+def normalize_review_case_video(content: bytes, mime_type: str) -> bytes:
+    """Convert case videos to Edge-compatible H.264/AAC MP4 with fast-start metadata."""
+    if not FFMPEG_EXE.is_file():
+        raise RuntimeError("视频兼容处理组件缺失。")
+    REVIEW_CASE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_hex(12)
+    input_suffix = REVIEW_CASE_VIDEO_TYPES.get(mime_type, ".video")
+    input_path = REVIEW_CASE_IMAGE_DIR / f".{token}.source{input_suffix}"
+    output_path = REVIEW_CASE_IMAGE_DIR / f".{token}.edge.mp4"
+    try:
+        input_path.write_bytes(content)
+        result = subprocess.run(
+            [
+                str(FFMPEG_EXE), "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(input_path), "-map", "0:v:0", "-map", "0:a:0?",
+                "-sn", "-dn", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-preset", "veryfast", "-crf", "22", "-c:a", "aac",
+                "-b:a", "128k", "-movflags", "+faststart", str(output_path),
+            ],
+            capture_output=True,
+            timeout=240,
+            check=False,
+        )
+        if result.returncode or not output_path.is_file() or output_path.stat().st_size == 0:
+            raise ValueError("视频转码失败，请换用标准 MP4 视频后重试。")
+        return output_path.read_bytes()
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("视频处理超时，请压缩视频后重试。") from error
+    finally:
+        input_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
 
 
 def user_by_id(data: dict, user_id: str) -> dict | None:
@@ -1084,6 +1346,13 @@ class Handler(SimpleHTTPRequestHandler):
             return None, data
         return user, data
 
+    def require_review_case_module_manager(self, data: dict | None = None) -> tuple[dict | None, dict]:
+        user, data = self.require_user(data)
+        if user and not is_visual_staff(user):
+            self.send_json({"error": "仅设计师、摄影师、剪辑师、渲染师可添加或删除案例模块。"}, HTTPStatus.FORBIDDEN)
+            return None, data
+        return user, data
+
     def can_edit_review_case_category(self, user: dict, data: dict, category: str) -> bool:
         if user.get("is_admin"):
             return True
@@ -1177,18 +1446,18 @@ class Handler(SimpleHTTPRequestHandler):
                 image_actuals = {metric["id"]: str(image_actuals.get(metric["id"], "")) for metric in image_metrics}
                 video_actuals = settings.get("video_actuals", {}).get(month, {})
                 video_actuals = {metric["id"]: str(video_actuals.get(metric["id"], "")) for metric in video_metrics}
-                image_notes = settings.get("image_notes", {}).get(month, {})
-                video_notes = settings.get("video_notes", {}).get(month, {})
+                image_notes = normalize_review_channel_notes(settings.get("image_notes", {}).get(month, {}))
+                video_notes = normalize_review_channel_notes(settings.get("video_notes", {}).get(month, {}))
                 ai_data = settings.get("ai_data", {}).get(month, {})
                 action_data = settings.get("action_data", {}).get(month, {})
                 self.send_json({
                     "month": month,
                     "image_metrics": image_metrics,
                     "image_actuals": image_actuals,
-                    "image_notes": {"anomaly": str(image_notes.get("anomaly", "")), "improvement": str(image_notes.get("improvement", ""))},
+                    "image_notes": image_notes,
                     "video_metrics": video_metrics,
                     "video_actuals": video_actuals,
-                    "video_notes": {"anomaly": str(video_notes.get("anomaly", "")), "improvement": str(video_notes.get("improvement", ""))},
+                    "video_notes": video_notes,
                     "ai_data": ai_data if isinstance(ai_data, dict) else {},
                     "ai_connector_webhook": str(settings.get("ai_connector", {}).get("webhook", "")),
                     "action_data": action_data if isinstance(action_data, dict) else {},
@@ -1205,7 +1474,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({
                     "editor_ids": editor_ids,
                     "can_edit": bool(user.get("is_admin") or user.get("id") in editor_ids),
-                    "can_manage": bool(user.get("is_admin")),
+                    "can_manage": is_visual_staff(user),
+                    "can_set_permissions": bool(user.get("is_admin")),
+                    "can_delete_cases": bool(user.get("is_admin")),
                 })
             return
         if path == "/api/review-click-permissions":
@@ -1228,7 +1499,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 cases = [item for item in data.get("review_cases", []) if item.get("month") == month]
                 cases.sort(key=lambda item: (item.get("category", ""), int(item.get("slot", 0))))
-                self.send_json({"month": month, "cases": cases})
+                modules = review_case_modules(data, month)
+                self.send_json({"month": month, "cases": cases, "modules": modules, "module_types": review_case_module_types(data, month, modules)})
             return
         if path.startswith("/api/review-case-images/"):
             user, data = self.require_user(data)
@@ -1263,14 +1535,24 @@ class Handler(SimpleHTTPRequestHandler):
             response_status = HTTPStatus.OK
             range_header = self.headers.get("Range", "")
             if range_header:
-                match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header.strip())
+                first_range = range_header.strip().split(",", 1)[0]
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", first_range)
                 if not match:
                     self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
                     self.send_header("Content-Range", f"bytes */{file_size}")
                     self.end_headers()
                     return
-                start = int(match.group(1))
-                end = min(int(match.group(2)) if match.group(2) else file_size - 1, file_size - 1)
+                if not match.group(1) and not match.group(2):
+                    self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    self.send_header("Content-Range", f"bytes */{file_size}")
+                    self.end_headers()
+                    return
+                if not match.group(1):
+                    suffix_length = min(int(match.group(2)), file_size)
+                    start, end = file_size - suffix_length, file_size - 1
+                else:
+                    start = int(match.group(1))
+                    end = min(int(match.group(2)) if match.group(2) else file_size - 1, file_size - 1)
                 if start > end or start >= file_size:
                     self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
                     self.send_header("Content-Range", f"bytes */{file_size}")
@@ -1282,6 +1564,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Type", image.get("mime", "application/octet-stream"))
             self.send_header("Content-Length", str(length))
             self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Disposition", "inline")
+            self.send_header("X-Content-Type-Options", "nosniff")
             if response_status == HTTPStatus.PARTIAL_CONTENT:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
             self.send_header("Cache-Control", "private, max-age=300")
@@ -1307,8 +1591,41 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             query = parse_qs(urlparse(self.path).query)
             month = str(query.get("month", [datetime.now().strftime("%Y-%m")])[0])
-            people = data.get("review_settings", {}).get("ai_data", {}).get(month, {}).get("people", [])
-            self.send_json({"month": month, "people": people if isinstance(people, list) else []})
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "统计月份格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            bucket = data.get("review_settings", {}).get("ai_data", {}).get(month, {})
+            bucket = bucket if isinstance(bucket, dict) else {}
+            people = bucket.get("people", [])
+            archive = bucket.get("archive_non_design")
+            archive_error = ""
+            if not isinstance(archive, dict) and month <= previous_month():
+                try:
+                    archive = save_ai_archive_month(month)
+                except (OSError, ValueError) as error:
+                    archive_error = str(error)
+            if not isinstance(archive, dict):
+                try:
+                    archive = ai_archive_roster(month)
+                except OSError as error:
+                    archive_error = archive_error or str(error)
+                    archive = {
+                        "month": month,
+                        "source": "共享盘目录",
+                        "statistics_ready": False,
+                        "total": 0,
+                        "unqualified": 0,
+                        "departments": [
+                            {"department": display_name, "total": 0, "unqualified": 0, "people": []}
+                            for _, display_name in AI_ARCHIVE_DEPARTMENTS
+                        ],
+                    }
+            self.send_json({
+                "month": month,
+                "people": people if isinstance(people, list) else [],
+                "archive_non_design": archive if isinstance(archive, dict) else {},
+                "archive_error": archive_error,
+            })
             return
         if path == "/api/dashboard-ai-sync":
             user, data = self.require_user(data)
@@ -1480,7 +1797,13 @@ class Handler(SimpleHTTPRequestHandler):
             editor_ids = list(dict.fromkeys(str(user_id) for user_id in incoming if str(user_id) in active_ids))
             data["review_case_editor_ids"] = editor_ids
             write_data(data)
-            self.send_json({"editor_ids": editor_ids, "can_edit": True, "can_manage": True})
+            self.send_json({
+                "editor_ids": editor_ids,
+                "can_edit": True,
+                "can_manage": True,
+                "can_set_permissions": True,
+                "can_delete_cases": True,
+            })
             return
         if path == "/api/review-click-permissions":
             data = read_data()
@@ -1617,6 +1940,56 @@ class Handler(SimpleHTTPRequestHandler):
             write_data(data)
             self.send_json({"upload": record, "synced": synced}, HTTPStatus.CREATED)
             return
+        if path == "/api/review-case-modules":
+            manager, data = self.require_review_case_module_manager(data)
+            if not manager:
+                return
+            payload = self.read_json()
+            if not isinstance(payload, dict):
+                return
+            month = str(payload.get("month", "")).strip()
+            category = str(payload.get("category", "")).strip()
+            action = str(payload.get("action", "")).strip()
+            media_type = str(payload.get("media_type", "")).strip()
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month) or category not in {"excellent", "improvement"}:
+                self.send_json({"error": "案例模块参数不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            modules = review_case_modules(data, month)
+            module_types = review_case_module_types(data, month, modules)
+            slots = modules[category]
+            if action == "add":
+                if media_type not in {"image", "video"}:
+                    self.send_json({"error": "请选择图片模块或视频模块。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                available = next((slot for slot in range(1, 25) if slot not in slots), None)
+                if available is None:
+                    self.send_json({"error": "每类案例最多添加 24 个模块。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                slots.append(available)
+                slots.sort()
+                module_types[category][str(available)] = media_type
+            elif action == "delete":
+                try:
+                    slot = int(payload.get("slot", 0))
+                except (TypeError, ValueError):
+                    slot = 0
+                if slot not in slots:
+                    self.send_json({"error": "未找到该案例模块。"}, HTTPStatus.NOT_FOUND)
+                    return
+                occupied = any(item.get("month") == month and item.get("category") == category and int(item.get("slot", 0)) == slot for item in data.get("review_cases", []))
+                if occupied:
+                    self.send_json({"error": "请先删除该模块中的案例内容，再删除模块。"}, HTTPStatus.CONFLICT)
+                    return
+                slots.remove(slot)
+                module_types[category].pop(str(slot), None)
+            else:
+                self.send_json({"error": "案例模块操作不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            data.setdefault("review_case_modules", {}).setdefault(month, {})[category] = slots
+            data.setdefault("review_case_module_types", {}).setdefault(month, {})[category] = module_types[category]
+            write_data(data)
+            self.send_json({"month": month, "modules": modules, "module_types": module_types})
+            return
         if path == "/api/review-cases":
             data = read_data()
             editor, data = self.require_user(data)
@@ -1634,6 +2007,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             if not self.require_review_case_category_editor(editor, data, values["category"]):
                 return
+            if values["category"] in {"excellent", "improvement"} and values["slot"] not in review_case_modules(data, values["month"])[values["category"]]:
+                self.send_json({"error": "该案例模块不存在，请联系管理员添加模块。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if values["category"] in {"excellent", "improvement"}:
+                expected_type = review_case_module_types(data, values["month"])[values["category"]].get(str(values["slot"]))
+                if expected_type != values["media_type"]:
+                    self.send_json({"error": "上传文件类型与案例模块类型不一致。"}, HTTPStatus.BAD_REQUEST)
+                    return
             occupied = any(
                 item.get("month") == values["month"]
                 and item.get("category") == values["category"]
@@ -1657,7 +2038,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if mime_type not in REVIEW_CASE_VIDEO_TYPES or not content or len(content) > MAX_REVIEW_CASE_VIDEO_BYTES or not valid_review_case_video(mime_type, content):
                     self.send_json({"error": "仅支持不超过 50 MB 的 MP4 或 WEBM 视频。"}, HTTPStatus.BAD_REQUEST)
                     return
-                suffix = REVIEW_CASE_VIDEO_TYPES[mime_type]
+                try:
+                    content = normalize_review_case_video(content, mime_type)
+                except (OSError, RuntimeError, ValueError) as error:
+                    self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                    return
+                mime_type = "video/mp4"
+                suffix = ".mp4"
             REVIEW_CASE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
             media_id = secrets.token_hex(12)
             file_path = REVIEW_CASE_IMAGE_DIR / f"{media_id}{suffix}"
@@ -1736,11 +2123,12 @@ class Handler(SimpleHTTPRequestHandler):
             if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
                 self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
                 return
+            notes = normalize_review_channel_notes(notes_incoming)
             notes = {
-                "anomaly": str(notes_incoming.get("anomaly", "")).strip(),
-                "improvement": str(notes_incoming.get("improvement", "")).strip(),
+                channel: {key: str(value).strip() for key, value in channel_notes.items()}
+                for channel, channel_notes in notes.items()
             }
-            if any(len(value) > 2000 for value in notes.values()):
+            if any(len(value) > 2000 for channel_notes in notes.values() for value in channel_notes.values()):
                 self.send_json({"error": "异常说明和改善方向每项不超过 2000 个字符。"}, HTTPStatus.BAD_REQUEST)
                 return
             settings = data.setdefault("review_settings", {})
@@ -2152,6 +2540,9 @@ class Handler(SimpleHTTPRequestHandler):
             if not case:
                 self.send_json({"error": "未找到该复盘案例。"}, HTTPStatus.NOT_FOUND)
                 return
+            if case.get("category", "") not in REVIEW_CLICK_CASE_CATEGORIES and not editor.get("is_admin"):
+                self.send_json({"error": "仅管理员可以删除案例内容和案例模块。"}, HTTPStatus.FORBIDDEN)
+                return
             if not self.require_review_case_category_editor(editor, data, case.get("category", "")):
                 return
             allowed_suffixes = {*REVIEW_CASE_IMAGE_TYPES.values(), *REVIEW_CASE_VIDEO_TYPES.values()}
@@ -2190,6 +2581,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
+    if args.port == 8081:
+        threading.Thread(target=ai_archive_monthly_sync_loop, name="ai-archive-monthly-sync", daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     print(f"AI视觉·无界舱服务已启动：http://0.0.0.0:{args.port}")
     server.serve_forever()

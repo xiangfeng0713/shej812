@@ -2,3 +2,5 @@ work/
 *.tmp
 *.log
 outputs/__pycache__/
+outputs/.video-tools/
+*.bak
