@@ -32,6 +32,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT.parent / "work" / "ai-visual-shared-data.json"
+REVIEW_LIVE_FILE = ROOT.parent / "work" / "review-live-data.json"
 SESSION_FILE = ROOT.parent / "work" / "ai-visual-sessions.json"
 REVIEW_UPLOAD_DIR = ROOT.parent / "work" / "review-imports"
 REVIEW_CASE_IMAGE_DIR = ROOT.parent / "work" / "review-case-images"
@@ -44,7 +45,7 @@ MAX_JSON_BYTES = 64 * 1024
 MAX_REVIEW_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_REVIEW_CASE_UPLOAD_BYTES = 70 * 1024 * 1024
 MAX_REVIEW_CASE_IMAGE_BYTES = 15 * 1024 * 1024
-MAX_REVIEW_CASE_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_REVIEW_CASE_VIDEO_BYTES = 500 * 1024 * 1024
 SHARED_DELIVERY_ROOT = r"\\192.168.2.6\设计师文件"
 DEFAULT_DEPARTMENTS = ["国内电商", "海外电商", "产品市场", "线下物料", "软件私域"]
 AI_ARCHIVE_ROOT = Path(r"\\192.168.2.6\设计师文件\AI图片存档")
@@ -67,10 +68,10 @@ REVIEW_CASE_VIDEO_TYPES = {
     "video/webm": ".webm",
 }
 REVIEW_CLICK_CASE_CATEGORIES = {
-    "domestic_high": ("国内渠道高点击率作品", {1, 2, 3}),
-    "domestic_low": ("国内渠道低点击率作品", {1, 2}),
-    "overseas_high": ("海外渠道高点击率作品", {1, 2, 3}),
-    "overseas_low": ("海外渠道低点击率作品", {1, 2}),
+    "domestic_high": ("国内渠道月度点击作品", {1, 2, 3, 4, 5, 6}),
+    "domestic_low": ("国内渠道高转化作品", {1, 2, 3}),
+    "overseas_high": ("海外渠道月度点击作品", {1, 2, 3, 4, 5, 6}),
+    "overseas_low": ("海外渠道高转化作品", {1, 2, 3}),
 }
 REVIEW_UPLOAD_TYPE = "月度复盘全量数据"
 REVIEW_REQUIRED_SHEETS = {"导入说明", "图片数据表现", "AI产出复盘", "视频数据表现", "结论与行动"}
@@ -211,6 +212,8 @@ def read_data() -> dict:
 
 
 DATA_WRITE_LOCK = threading.Lock()
+DATA_UPDATE_LOCK = threading.Lock()
+REVIEW_LIVE_LOCK = threading.Lock()
 
 
 def write_data(data: dict) -> None:
@@ -220,7 +223,45 @@ def write_data(data: dict) -> None:
     with DATA_WRITE_LOCK:
         temp = DATA_FILE.with_name(f"{DATA_FILE.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
         temp.write_text(payload, encoding="utf-8")
-        temp.replace(DATA_FILE)
+        try:
+            for attempt in range(5):
+                try:
+                    temp.replace(DATA_FILE)
+                    break
+                except OSError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+        finally:
+            temp.unlink(missing_ok=True)
+
+
+def read_review_live_data() -> dict:
+    if not REVIEW_LIVE_FILE.exists():
+        return {}
+    try:
+        value = json.loads(REVIEW_LIVE_FILE.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def write_review_live_data(data: dict) -> None:
+    REVIEW_LIVE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    temp = REVIEW_LIVE_FILE.with_name(f"{REVIEW_LIVE_FILE.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
+    temp.write_text(payload, encoding="utf-8")
+    try:
+        for attempt in range(5):
+            try:
+                temp.replace(REVIEW_LIVE_FILE)
+                break
+            except OSError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def previous_month(value: datetime | None = None) -> str:
@@ -245,6 +286,51 @@ def normalize_review_channel_notes(value: object) -> dict[str, dict[str, str]]:
         "improvement": str(raw.get("improvement", "")),
     }
     return {"domestic": dict(legacy), "overseas": dict(legacy)}
+
+
+def normalize_review_action_data(value: object) -> dict:
+    raw = value if isinstance(value, dict) else {}
+    sections = raw.get("sections") if isinstance(raw.get("sections"), dict) else {}
+    normalized_sections = {
+        field: str(sections.get(field, raw.get(field, "")))[:4000]
+        for field in ("wins", "problems", "causes", "risks", "collaboration", "summary", "improvement")
+    }
+    # Surface earlier entries in the new compact fields instead of hiding them.
+    if not normalized_sections["summary"] and normalized_sections["wins"]:
+        normalized_sections["summary"] = normalized_sections["wins"]
+    if not normalized_sections["improvement"] and normalized_sections["causes"]:
+        normalized_sections["improvement"] = normalized_sections["causes"]
+    if normalized_sections["risks"] and normalized_sections["risks"] not in normalized_sections["problems"]:
+        normalized_sections["problems"] = (
+            normalized_sections["problems"] + "\n风险与依赖：" + normalized_sections["risks"]
+        ).strip()[:4000]
+    departments = raw.get("departments") if isinstance(raw.get("departments"), dict) else {}
+    normalized_departments = {
+        department: str(departments.get(department, ""))[:4000]
+        for department in ("国内电商", "海外电商", "代理线", "线下物料", "软件私域")
+    }
+    # Preserve suggestions saved under the former department name.
+    if not normalized_departments["代理线"] and departments.get("产品市场"):
+        normalized_departments["代理线"] = str(departments.get("产品市场", ""))[:4000]
+    actions = []
+    for index, item in enumerate(raw.get("actions", []) if isinstance(raw.get("actions"), list) else []):
+        if not isinstance(item, dict):
+            continue
+        action_id = str(item.get("id", "")).strip() or f"legacy-{index + 1}"
+        action_text = str(item.get("action", ""))
+        collaboration = str(item.get("collaboration", "")).strip()
+        if collaboration and collaboration not in action_text:
+            action_text = (action_text + "\n协同：" + collaboration).strip()
+        actions.append({
+            "id": action_id[:40],
+            "problem": str(item.get("problem", ""))[:1000],
+            "action": action_text[:2000],
+            "owner": str(item.get("owner", ""))[:100],
+            "due_date": str(item.get("due_date", ""))[:30],
+            "acceptance": str(item.get("acceptance", ""))[:2000],
+            "status": str(item.get("status", "待开始"))[:30] or "待开始",
+        })
+    return {"sections": normalized_sections, "departments": normalized_departments, "actions": actions[:30]}
 
 
 def scan_ai_archive_month(month: str) -> dict:
@@ -953,6 +1039,10 @@ def normalize_review_case(payload: dict) -> dict:
     media_type = str(payload.get("media_type", "image")).strip()
     task_id = str(payload.get("task_id", "")).strip()
     click_rate = str(payload.get("click_rate", "")).strip()
+    completion_rate = str(payload.get("completion_rate", "")).strip()
+    conversion_rate = str(payload.get("conversion_rate", "")).strip()
+    play_count = str(payload.get("play_count", "")).strip().replace(",", "")
+    gmv = str(payload.get("gmv", "")).strip().replace(" ", "")
     point = str(payload.get("point", "")).strip()
     try:
         slot = int(payload.get("slot", 0))
@@ -966,12 +1056,37 @@ def normalize_review_case(payload: dict) -> dict:
         raise ValueError("案例媒体类型不正确。")
     if category in REVIEW_CLICK_CASE_CATEGORIES:
         _, allowed_slots = REVIEW_CLICK_CASE_CATEGORIES[category]
-        if media_type != "image" or slot not in allowed_slots:
-            raise ValueError("点击率作品仅支持对应卡位的图片上传。")
-        matched_rate = re.fullmatch(r"(100(?:\.0{1,2})?|(?:\d{1,2})(?:\.\d{1,2})?)%?", click_rate)
-        if not matched_rate:
-            raise ValueError("请填写 0% 到 100% 的真实点击率，最多保留两位小数。")
-        click_rate = f"{matched_rate.group(1)}%"
+        expected_video = slot in {5, 6} if category in {"domestic_high", "overseas_high"} else slot == max(allowed_slots)
+        if slot not in allowed_slots or (media_type == "video") != expected_video:
+            raise ValueError("请在对应的图片或视频卡位上传榜单作品。")
+        is_overseas_video = category == "overseas_high" and media_type == "video"
+        if is_overseas_video:
+            if not re.fullmatch(r"\d+(?:\.\d+)?", play_count) or float(play_count) < 0:
+                raise ValueError("请填写正确的播放量。")
+            matched_gmv = re.fullmatch(r"(\d+(?:\.\d+)?)(万|元)?", gmv)
+            if not matched_gmv:
+                raise ValueError("请填写正确的 GMV，例如 6000 或 300万。")
+            gmv = matched_gmv.group(1) + (matched_gmv.group(2) or "")
+            click_rate = ""
+            conversion_rate = ""
+        else:
+            matched_rate = re.fullmatch(r"(100(?:\.0{1,2})?|(?:\d{1,2})(?:\.\d{1,2})?)%?", click_rate)
+            if not matched_rate:
+                raise ValueError("请填写 0% 到 100% 的真实点击率，最多保留两位小数。")
+            click_rate = f"{matched_rate.group(1)}%"
+            matched_conversion = re.fullmatch(r"(100(?:\.0{1,2})?|(?:\d{1,2})(?:\.\d{1,2})?)%?", conversion_rate)
+            if not matched_conversion:
+                raise ValueError("请填写 0% 到 100% 的真实转化率，最多保留两位小数。")
+            conversion_rate = f"{matched_conversion.group(1)}%"
+            play_count = ""
+            gmv = ""
+        if media_type == "video":
+            matched_completion = re.fullmatch(r"(100(?:\.0{1,2})?|(?:\d{1,2})(?:\.\d{1,2})?)%?", completion_rate)
+            if not matched_completion:
+                raise ValueError("请填写 0% 到 100% 的真实完播率，最多保留两位小数。")
+            completion_rate = f"{matched_completion.group(1)}%"
+        else:
+            completion_rate = ""
     elif slot not in range(1, 25):
         raise ValueError("案例卡位不正确。")
     if task_id and not re.fullmatch(r"[0-9a-f]{20}", task_id):
@@ -980,7 +1095,7 @@ def normalize_review_case(payload: dict) -> dict:
         raise ValueError("请选择关联任务。")
     if not point or len(point) > 1200:
         raise ValueError("请填写不超过 1200 个字符的案例要点。")
-    return {"month": month, "category": category, "media_type": media_type, "slot": slot, "task_id": task_id, "click_rate": click_rate if category in REVIEW_CLICK_CASE_CATEGORIES else "", "point": point}
+    return {"month": month, "category": category, "media_type": media_type, "slot": slot, "task_id": task_id, "click_rate": click_rate if category in REVIEW_CLICK_CASE_CATEGORIES else "", "completion_rate": completion_rate if category in REVIEW_CLICK_CASE_CATEGORIES and media_type == "video" else "", "conversion_rate": conversion_rate if category in REVIEW_CLICK_CASE_CATEGORIES else "", "play_count": play_count if category == "overseas_high" and media_type == "video" else "", "gmv": gmv if category == "overseas_high" and media_type == "video" else "", "point": point}
 
 
 def review_case_task(data: dict, task_id: str) -> dict:
@@ -1064,6 +1179,7 @@ def normalize_review_case_video(content: bytes, mime_type: str) -> bytes:
             capture_output=True,
             timeout=240,
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if result.returncode or not output_path.is_file() or output_path.stat().st_size == 0:
             raise ValueError("视频转码失败，请换用标准 MP4 视频后重试。")
@@ -1442,14 +1558,17 @@ class Handler(SimpleHTTPRequestHandler):
                             metric["target"] = str(saved[metric["id"]]).strip()
                 else:
                     video_metrics = [dict(metric) for metric in video_metrics]
-                image_actuals = settings.get("image_actuals", {}).get(month, {})
+                live_review = read_review_live_data()
+                image_actuals = live_review.get("image_actuals", {}).get(month, settings.get("image_actuals", {}).get(month, {}))
                 image_actuals = {metric["id"]: str(image_actuals.get(metric["id"], "")) for metric in image_metrics}
-                video_actuals = settings.get("video_actuals", {}).get(month, {})
+                video_actuals = live_review.get("video_actuals", {}).get(month, settings.get("video_actuals", {}).get(month, {}))
                 video_actuals = {metric["id"]: str(video_actuals.get(metric["id"], "")) for metric in video_metrics}
-                image_notes = normalize_review_channel_notes(settings.get("image_notes", {}).get(month, {}))
-                video_notes = normalize_review_channel_notes(settings.get("video_notes", {}).get(month, {}))
+                image_notes = normalize_review_channel_notes(live_review.get("image_notes", {}).get(month, settings.get("image_notes", {}).get(month, {})))
+                video_notes = normalize_review_channel_notes(live_review.get("video_notes", {}).get(month, settings.get("video_notes", {}).get(month, {})))
                 ai_data = settings.get("ai_data", {}).get(month, {})
-                action_data = settings.get("action_data", {}).get(month, {})
+                action_data = normalize_review_action_data(
+                    live_review.get("action_data", {}).get(month, settings.get("action_data", {}).get(month, {}))
+                )
                 self.send_json({
                     "month": month,
                     "image_metrics": image_metrics,
@@ -1670,7 +1789,7 @@ class Handler(SimpleHTTPRequestHandler):
             # Serve the console directly at the stable preview root.  Some
             # embedded browsers reject or time out on the extra local redirect.
             self.path = "/ai-starrail-design-console.html"
-        elif path != "/ai-starrail-design-console.html":
+        elif path not in {"/ai-starrail-design-console.html", "/AIVisualSharedFolderOpener.exe"}:
             self.send_json({"error": "资源不存在。"}, HTTPStatus.NOT_FOUND)
             return
         super().do_GET()
@@ -2036,7 +2155,7 @@ class Handler(SimpleHTTPRequestHandler):
                 suffix = REVIEW_CASE_IMAGE_TYPES[mime_type]
             else:
                 if mime_type not in REVIEW_CASE_VIDEO_TYPES or not content or len(content) > MAX_REVIEW_CASE_VIDEO_BYTES or not valid_review_case_video(mime_type, content):
-                    self.send_json({"error": "仅支持不超过 50 MB 的 MP4 或 WEBM 视频。"}, HTTPStatus.BAD_REQUEST)
+                    self.send_json({"error": "仅支持不超过 500 MB 的 MP4 或 WEBM 视频。"}, HTTPStatus.BAD_REQUEST)
                     return
                 try:
                     content = normalize_review_case_video(content, mime_type)
@@ -2071,9 +2190,141 @@ class Handler(SimpleHTTPRequestHandler):
         if payload is None:
             return
         data = read_data()
+        if path == "/api/review-note":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            section = str(payload.get("section", "")).strip()
+            month = str(payload.get("month", "")).strip()
+            channel = str(payload.get("channel", "")).strip()
+            field = str(payload.get("field", "")).strip()
+            value = str(payload.get("value", "")).strip()
+            if (
+                section not in {"image", "video"}
+                or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month)
+                or channel not in {"domestic", "overseas"}
+                or field not in {"anomaly", "improvement"}
+            ):
+                self.send_json({"error": "复盘说明类型或月份不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(value) > 2000:
+                self.send_json({"error": "异常说明和改善方向每项不超过 2000 个字符。"}, HTTPStatus.BAD_REQUEST)
+                return
+            # Store live review fields separately from task/account data. Other
+            # modules can no longer replace these values with an older snapshot.
+            with REVIEW_LIVE_LOCK:
+                live_review = read_review_live_data()
+                notes_by_month = live_review.setdefault(f"{section}_notes", {})
+                notes = normalize_review_channel_notes(notes_by_month.get(month, data.get("review_settings", {}).get(f"{section}_notes", {}).get(month, {})))
+                notes[channel][field] = value
+                notes_by_month[month] = notes
+                live_review["updated_by"] = public_user(user)
+                live_review["updated_at"] = now()
+                write_review_live_data(live_review)
+            self.send_json({"month": month, f"{section}_notes": notes})
+            return
+        if path == "/api/review-action":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            month = str(payload.get("month", "")).strip()
+            operation = str(payload.get("operation", "field")).strip()
+            if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "请选择正确的复盘月份。"}, HTTPStatus.BAD_REQUEST)
+                return
+            settings = data.get("review_settings", {})
+            with REVIEW_LIVE_LOCK:
+                live_review = read_review_live_data()
+                stored = live_review.get("action_data", {}).get(month, settings.get("action_data", {}).get(month, {}))
+                action_data = normalize_review_action_data(stored)
+                if operation == "section":
+                    field = str(payload.get("field", "")).strip()
+                    value = str(payload.get("value", ""))
+                    if field not in {"wins", "problems", "causes", "risks", "collaboration", "summary", "improvement"} or len(value) > 4000:
+                        self.send_json({"error": "结论字段不正确或内容过长。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    action_data["sections"][field] = value
+                elif operation == "department":
+                    department = str(payload.get("department", "")).strip()
+                    value = str(payload.get("value", ""))
+                    allowed_departments = {"国内电商", "海外电商", "代理线", "线下物料", "软件私域"}
+                    if department not in allowed_departments or len(value) > 4000:
+                        self.send_json({"error": "协同部门不正确或内容过长。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    action_data["departments"][department] = value
+                elif operation == "add":
+                    if len(action_data["actions"]) >= 30:
+                        self.send_json({"error": "每月最多记录 30 条行动。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    action_data["actions"].append({"id": secrets.token_hex(8), "problem": "", "action": "", "owner": "", "due_date": "", "acceptance": "", "status": "待开始"})
+                elif operation == "delete":
+                    action_id = str(payload.get("id", "")).strip()
+                    action_data["actions"] = [item for item in action_data["actions"] if item["id"] != action_id]
+                elif operation == "action":
+                    action_id = str(payload.get("id", "")).strip()
+                    field = str(payload.get("field", "")).strip()
+                    value = str(payload.get("value", ""))
+                    limits = {"problem": 1000, "action": 2000, "owner": 100, "due_date": 30, "acceptance": 2000, "status": 30}
+                    item = next((entry for entry in action_data["actions"] if entry["id"] == action_id), None)
+                    if not item or field not in limits or len(value) > limits[field]:
+                        self.send_json({"error": "行动字段不正确或内容过长。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    if field == "due_date" and value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                        self.send_json({"error": "目标日期格式不正确。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    if field == "status" and value not in {"待开始", "进行中", "待验收", "已完成", "已延期"}:
+                        self.send_json({"error": "行动状态不正确。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    item[field] = value
+                else:
+                    self.send_json({"error": "不支持的行动操作。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                live_review.setdefault("action_data", {})[month] = action_data
+                live_review["updated_by"] = public_user(user)
+                live_review["updated_at"] = now()
+                write_review_live_data(live_review)
+            self.send_json({"month": month, "action_data": action_data, "updated_by": public_user(user)})
+            return
+        if path == "/api/review-actuals":
+            user, data = self.require_user(data)
+            if not user:
+                return
+            section = str(payload.get("section", "image")).strip()
+            month = str(payload.get("month", "")).strip()
+            metric_pattern = re.compile(r"\d{1,12}(?:\.\d{1,4})?")
+            if section not in {"image", "video"} or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                self.send_json({"error": "复盘类型或月份不正确。"}, HTTPStatus.BAD_REQUEST)
+                return
+            actual_incoming = payload.get(f"{section}_actuals")
+            if not isinstance(actual_incoming, dict):
+                self.send_json({"error": "请填写当月实际值。"}, HTTPStatus.BAD_REQUEST)
+                return
+            settings = data.setdefault("review_settings", {})
+            stored_metrics = settings.get(f"{section}_metrics")
+            metrics = stored_metrics if isinstance(stored_metrics, list) else (
+                DEFAULT_IMAGE_REVIEW_METRICS if section == "image" else DEFAULT_VIDEO_REVIEW_METRICS
+            )
+            actuals = {str(metric.get("id", "")): str(actual_incoming.get(str(metric.get("id", "")), "")).strip() for metric in metrics}
+            if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
+                self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
+                return
+            with REVIEW_LIVE_LOCK:
+                live_review = read_review_live_data()
+                live_review.setdefault(f"{section}_actuals", {})[month] = actuals
+                notes = normalize_review_channel_notes(live_review.get(f"{section}_notes", {}).get(month, settings.get(f"{section}_notes", {}).get(month, {})))
+                live_review["updated_by"] = public_user(user)
+                live_review["updated_at"] = now()
+                write_review_live_data(live_review)
+            self.send_json({
+                "month": month,
+                f"{section}_metrics": metrics,
+                f"{section}_actuals": actuals,
+                f"{section}_notes": notes,
+            })
+            return
         if path == "/api/review-settings":
-            admin, data = self.require_admin(data)
-            if not admin:
+            user, data = self.require_user(data)
+            if not user:
                 return
             section = str(payload.get("section", "image")).strip()
             month = str(payload.get("month", "")).strip()
@@ -2119,6 +2370,23 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 ids.add(metric_id)
                 metrics.append({"id": metric_id, "group": group, "label": label, "unit": unit, "compare": compare, "target": target})
+            if not user.get("is_admin"):
+                settings = data.get("review_settings", {})
+                saved_metrics = settings.get(f"{section}_metrics")
+                baseline = saved_metrics if isinstance(saved_metrics, list) else (
+                    DEFAULT_IMAGE_REVIEW_METRICS if section == "image" else DEFAULT_VIDEO_REVIEW_METRICS
+                )
+                baseline_by_id = {str(metric.get("id", "")): metric for metric in baseline if isinstance(metric, dict)}
+                incoming_ids = {metric["id"] for metric in metrics}
+                if incoming_ids != set(baseline_by_id):
+                    self.send_json({"error": "只有管理员可以新增或删除指标。"}, HTTPStatus.FORBIDDEN)
+                    return
+                if any(
+                    any(metric[key] != str(baseline_by_id[metric["id"]].get(key, "")) for key in ("group", "label", "unit", "compare", "target"))
+                    for metric in metrics
+                ):
+                    self.send_json({"error": "只有管理员可以修改指标定义或目标值。"}, HTTPStatus.FORBIDDEN)
+                    return
             actuals = {metric["id"]: str(actual_incoming.get(metric["id"], "")).strip() for metric in metrics}
             if any(value and not metric_pattern.fullmatch(value) for value in actuals.values()):
                 self.send_json({"error": "当月实际值仅支持数字，可暂时留空。"}, HTTPStatus.BAD_REQUEST)
@@ -2141,9 +2409,16 @@ class Handler(SimpleHTTPRequestHandler):
                 f"{section}_actuals": actuals,
                 f"{section}_notes": notes,
             }
-            settings["updated_by"] = public_user(admin)
+            settings["updated_by"] = public_user(user)
             settings["updated_at"] = now()
             write_data(data)
+            with REVIEW_LIVE_LOCK:
+                live_review = read_review_live_data()
+                live_review.setdefault(f"{section}_actuals", {})[month] = actuals
+                live_review.setdefault(f"{section}_notes", {})[month] = notes
+                live_review["updated_by"] = public_user(user)
+                live_review["updated_at"] = now()
+                write_review_live_data(live_review)
             self.send_json(response)
             return
         if path == "/api/bootstrap":
@@ -2445,9 +2720,16 @@ class Handler(SimpleHTTPRequestHandler):
             if not case:
                 self.send_json({"error": "未找到该复盘案例。"}, HTTPStatus.NOT_FOUND)
                 return
-            payload = self.read_json()
-            if payload is None:
-                return
+            replacing_uploads: list[tuple[str, str, bytes]] = []
+            if "multipart/form-data" in self.headers.get("Content-Type", ""):
+                parsed = self.read_review_case_upload()
+                if not parsed:
+                    return
+                payload, replacing_uploads = parsed
+            else:
+                payload = self.read_json()
+                if payload is None:
+                    return
             try:
                 values = normalize_review_case(payload)
                 values["task"] = review_case_task(data, values["task_id"]) if values["task_id"] else {}
@@ -2467,10 +2749,61 @@ class Handler(SimpleHTTPRequestHandler):
             if occupied:
                 self.send_json({"error": "该案例卡位已有内容。"}, HTTPStatus.CONFLICT)
                 return
+            if not replacing_uploads and values["media_type"] != case.get("media_type", "image"):
+                self.send_json({"error": "更换媒体类型时请同时选择新的作品文件。"}, HTTPStatus.BAD_REQUEST)
+                return
+            replacement = None
+            if replacing_uploads:
+                if len(replacing_uploads) != 1:
+                    self.send_json({"error": "每个案例只能上传 1 个作品文件。"}, HTTPStatus.BAD_REQUEST)
+                    return
+                filename, mime_type, content = replacing_uploads[0]
+                if values["media_type"] == "image":
+                    if mime_type not in REVIEW_CASE_IMAGE_TYPES or not content or len(content) > MAX_REVIEW_CASE_IMAGE_BYTES or not valid_review_case_image(mime_type, content):
+                        self.send_json({"error": "仅支持单张不超过 15 MB 的 JPG、PNG 或 WEBP 图片。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    suffix = REVIEW_CASE_IMAGE_TYPES[mime_type]
+                else:
+                    if mime_type not in REVIEW_CASE_VIDEO_TYPES or not content or len(content) > MAX_REVIEW_CASE_VIDEO_BYTES or not valid_review_case_video(mime_type, content):
+                        self.send_json({"error": "仅支持不超过 500 MB 的 MP4 或 WEBM 视频。"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    try:
+                        content = normalize_review_case_video(content, mime_type)
+                    except (OSError, RuntimeError, ValueError) as error:
+                        self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                        return
+                    mime_type = "video/mp4"
+                    suffix = ".mp4"
+                REVIEW_CASE_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                media_id = secrets.token_hex(12)
+                replacement_path = REVIEW_CASE_IMAGE_DIR / f"{media_id}{suffix}"
+                try:
+                    replacement_path.write_bytes(content)
+                except OSError:
+                    replacement_path.unlink(missing_ok=True)
+                    self.send_json({"error": "替换作品文件保存失败。"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                replacement = {"id": media_id, "name": Path(filename).name[:120], "mime": mime_type, "suffix": suffix}
+            old_media = list(case.get("images", []))
             case.update(values)
+            if replacement:
+                case["images"] = [replacement]
             case["updated_by"] = public_user(editor)
             case["updated_at"] = now()
-            write_data(data)
+            try:
+                write_data(data)
+            except OSError:
+                if replacement:
+                    (REVIEW_CASE_IMAGE_DIR / f"{replacement['id']}{replacement['suffix']}").unlink(missing_ok=True)
+                self.send_json({"error": "案例更新失败。"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            if replacement:
+                allowed_suffixes = {*REVIEW_CASE_IMAGE_TYPES.values(), *REVIEW_CASE_VIDEO_TYPES.values()}
+                for media in old_media:
+                    old_id = str(media.get("id", ""))
+                    old_suffix = str(media.get("suffix", ""))
+                    if re.fullmatch(r"[0-9a-f]{24}", old_id) and old_suffix in allowed_suffixes:
+                        (REVIEW_CASE_IMAGE_DIR / f"{old_id}{old_suffix}").unlink(missing_ok=True)
             self.send_json({"case": case})
             return
         if not path.startswith("/api/users/"):
@@ -2546,16 +2879,23 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_review_case_category_editor(editor, data, case.get("category", "")):
                 return
             allowed_suffixes = {*REVIEW_CASE_IMAGE_TYPES.values(), *REVIEW_CASE_VIDEO_TYPES.values()}
+            media_paths = []
             for image in case.get("images", []):
                 image_id = str(image.get("id", ""))
                 suffix = str(image.get("suffix", ""))
                 if re.fullmatch(r"[0-9a-f]{24}", image_id) and suffix in allowed_suffixes:
-                    try:
-                        (REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}").unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                    media_paths.append(REVIEW_CASE_IMAGE_DIR / f"{image_id}{suffix}")
             data["review_cases"] = [item for item in cases if item.get("id") != case_id]
-            write_data(data)
+            try:
+                write_data(data)
+            except OSError:
+                self.send_json({"error": "共享数据暂时被占用，请稍后重试。"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            for media_path in media_paths:
+                try:
+                    media_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             self.send_json({"ok": True})
             return
         if not path.startswith("/api/users/"):
